@@ -1,0 +1,39 @@
+{
+  "git@github.com:tsipa/bpf-next" : {
+    "branches" : {
+      "bpf-next" : {
+        "pw_search_patterns" : [
+          {
+            "archived" : false,
+            "project" : 7,
+            "q" : "bpf-next",
+            "state" : 1
+          }
+        ],
+        "upstream" : "https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git",
+        "upstream_branch": "master",
+        "pw_url" : "https://patchwork.ozlabs.org/",
+        "pw_lookback" : 7,
+        "ci_repo": "git@github.com:tsipa/bpf-tests",
+        "ci_branch": "master"
+      },
+      "bpf" : {
+        "pw_search_patterns" : [
+          {
+            "archived" : false,
+            "project" : 7,
+            "q" : "bpf",
+            "state" : 1
+          }
+        ],
+        "upstream" : "https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf.git",
+        "upstream_branch": "master",
+        "pw_url" : "https://patchwork.ozlabs.org/",
+        "pw_lookback" : 7,
+        "ci_repo": "git@github.com:tsipa/bpf-tests",
+        "ci_branch": "master"
+      }
+    },
+   "github_oauth_token" : "e79fgsdfdsgfdgssdfg"
+ }
+}
