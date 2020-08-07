@@ -192,7 +192,7 @@ void test_mmap(void)
 	/* unmap second page: pages 1, 3 mapped */
 	err = munmap(tmp1 + page_size, page_size);
 	if (CHECK(err, "adv_mmap2", "errno %d\n", errno)) {
-		munmap(tmp1, map_sz);
+		munmap(tmp1, 3 * page_size);
 		goto cleanup;
 	}
 
@@ -207,8 +207,8 @@ void test_mmap(void)
 	CHECK(tmp1 + page_size != tmp2, "adv_mmap4",
 	      "tmp1: %p, tmp2: %p\n", tmp1, tmp2);
 
-	/* re-map all 4 pages */
-	tmp2 = mmap(tmp1, 4 * page_size, PROT_READ, MAP_SHARED | MAP_FIXED,
+	/* re-map all 3 pages */
+	tmp2 = mmap(tmp1, 3 * page_size, PROT_READ, MAP_SHARED | MAP_FIXED,
 		    data_map_fd, 0);
 	if (CHECK(tmp2 == MAP_FAILED, "adv_mmap5", "errno %d\n", errno)) {
 		munmap(tmp1, 3 * page_size); /* unmap page 1 */
@@ -226,7 +226,7 @@ void test_mmap(void)
 	CHECK_FAIL(map_data->val[2] != 321);
 	CHECK_FAIL(map_data->val[far] != 3 * 321);
 
-	munmap(tmp2, 4 * page_size);
+	munmap(tmp2, 3 * page_size);
 
 	/* map all 4 pages, but with pg_off=1 page, should fail */
 	tmp1 = mmap(NULL, 4 * page_size, PROT_READ, MAP_SHARED | MAP_FIXED,
