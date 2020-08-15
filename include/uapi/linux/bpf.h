@@ -3394,6 +3394,36 @@ union bpf_attr {
  *		A non-negative value equal to or less than *size* on success,
  *		or a negative error in case of failure.
  *
+ * long bpf_trace_btf(struct btf_ptr *ptr, u32 btf_ptr_size, u32 trace_id, u64 flags)
+ *	Description
+ *		Utilize BTF to trace a representation of *ptr*->ptr, using
+ *		*ptr*->type name or *ptr*->type_id.  *ptr*->type_name
+ *		should specify the type *ptr*->ptr points to. Traversing that
+ *		data structure using BTF, the type information and values are
+ *		bpf_trace_printk()ed.  Safe copy of the pointer data is
+ *		carried out to avoid kernel crashes during data display.
+ *		Tracing specifies *trace_id* as the id associated with the
+ *		trace event; this can be used to filter trace events
+ *		to show a subset of all traced output, helping to avoid
+ *		the situation where BTF output is intermixed with other
+ *		output.
+ *
+ *		*flags* is a combination of
+ *
+ *		**BTF_TRACE_F_COMPACT**
+ *			no formatting around type information
+ *		**BTF_TRACE_F_NONAME**
+ *			no struct/union member names/types
+ *		**BTF_TRACE_F_PTR_RAW**
+ *			show raw (unobfuscated) pointer values;
+ *			equivalent to printk specifier %px.
+ *		**BTF_TRACE_F_ZERO**
+ *			show zero-valued struct/union members; they
+ *			are not displayed by default
+ *
+ *	Return
+ *		The number of bytes traced, or a negative error in cases of
+ *		failure.
  */
 #define __BPF_FUNC_MAPPER(FN)		\
 	FN(unspec),			\
@@ -3538,6 +3568,7 @@ union bpf_attr {
 	FN(skc_to_tcp_request_sock),	\
 	FN(skc_to_udp6_sock),		\
 	FN(get_task_stack),		\
+	FN(trace_btf),			\
 	/* */
 
 /* integer value in 'imm' field of BPF_CALL instruction selects which helper
@@ -4444,6 +4475,38 @@ struct bpf_sk_lookup {
 	__u32 local_ip4;	/* Network byte order */
 	__u32 local_ip6[4];	/* Network byte order */
 	__u32 local_port;	/* Host byte order */
+};
+
+/*
+ * struct btf_ptr is used for typed pointer display; the
+ * additional type string/BTF type id are used to render the pointer
+ * data as the appropriate type via the bpf_trace_btf() helper
+ * above.  A flags field - potentially to specify additional details
+ * about the BTF pointer (rather than its mode of display) - is
+ * present for future use.  Display flags - BTF_TRACE_F_* - are
+ * passed to display functions separately.
+ */
+struct btf_ptr {
+	void *ptr;
+	const char *type;
+	__u32 type_id;
+	__u32 flags;		/* BTF ptr flags; unused at present. */
+};
+
+/*
+ * Flags to control bpf_trace_btf() behaviour.
+ *	- BTF_TRACE_F_COMPACT: no formatting around type information
+ *	- BTF_TRACE_F_NONAME: no struct/union member names/types
+ *	- BTF_TRACE_F_PTR_RAW: show raw (unobfuscated) pointer values;
+ *	  equivalent to %px.
+ *	- BTF_TRACE_F_ZERO: show zero-valued struct/union members; they
+ *	  are not displayed by default
+ */
+enum {
+	BTF_TRACE_F_COMPACT	=	(1ULL << 0),
+	BTF_TRACE_F_NONAME	=	(1ULL << 1),
+	BTF_TRACE_F_PTR_RAW	=	(1ULL << 2),
+	BTF_TRACE_F_ZERO	=	(1ULL << 3),
 };
 
 #endif /* _UAPI__LINUX_BPF_H__ */

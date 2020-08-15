@@ -6,6 +6,7 @@
 
 #include <linux/types.h>
 #include <uapi/linux/btf.h>
+#include <uapi/linux/bpf.h>
 
 #define BTF_TYPE_EMIT(type) ((void)(type *)0)
 
@@ -61,10 +62,10 @@ const struct btf_type *btf_type_id_size(const struct btf *btf,
  *	- BTF_SHOW_UNSAFE: skip use of bpf_probe_read() to safely read
  *	  data before displaying it.
  */
-#define BTF_SHOW_COMPACT	(1ULL << 0)
-#define BTF_SHOW_NONAME		(1ULL << 1)
-#define BTF_SHOW_PTR_RAW	(1ULL << 2)
-#define BTF_SHOW_ZERO		(1ULL << 3)
+#define BTF_SHOW_COMPACT	BTF_TRACE_F_COMPACT
+#define BTF_SHOW_NONAME		BTF_TRACE_F_NONAME
+#define BTF_SHOW_PTR_RAW	BTF_TRACE_F_PTR_RAW
+#define BTF_SHOW_ZERO		BTF_TRACE_F_ZERO
 #define BTF_SHOW_NONEWLINE	(1ULL << 32)
 #define BTF_SHOW_UNSAFE		(1ULL << 33)
 
