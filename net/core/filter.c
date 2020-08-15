@@ -3765,6 +3765,54 @@ static const struct bpf_func_proto bpf_xdp_redirect_map_proto = {
 	.arg3_type      = ARG_ANYTHING,
 };
 
+static DEFINE_PER_CPU(struct sk_buff *, hash_skb);
+
+BPF_CALL_1(bpf_get_skb_hash, struct xdp_buff *, xdp)
+{
+	void *data_end = xdp->data_end;
+	struct ethhdr *eth = xdp->data;
+	void *data = xdp->data;
+	unsigned long flags;
+	struct sk_buff *skb;
+	int nh_off, len;
+	u32 ret = 0;
+
+	/* disable interrupts to get the correct skb pointer */
+	local_irq_save(flags);
+
+	len = data_end - data;
+	skb = this_cpu_read(hash_skb);
+	if (!skb) {
+		skb = alloc_skb(len, GFP_ATOMIC);
+		if (!skb)
+			goto out;
+		this_cpu_write(hash_skb, skb);
+	}
+
+	nh_off = sizeof(*eth);
+	if (data + nh_off > data_end)
+		goto out;
+
+	skb->data = data;
+	skb->head = data;
+	skb->network_header = nh_off;
+	skb->protocol = eth->h_proto;
+	skb->len = len;
+	skb->dev = xdp->rxq->dev;
+
+	ret = skb_get_hash(skb);
+out:
+	local_irq_restore(flags);
+	return ret;
+}
+
+const struct bpf_func_proto bpf_get_skb_hash_proto = {
+	.func		= bpf_get_skb_hash,
+	.gpl_only	= false,
+	.ret_type	= RET_INTEGER,
+	.arg1_type	= ARG_PTR_TO_CTX,
+};
+
 static unsigned long bpf_skb_copy(void *dst_buff, const void *skb,
 				  unsigned long off, unsigned long len)
 {
@@ -6503,6 +6551,8 @@ xdp_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 		return &bpf_xdp_adjust_tail_proto;
 	case BPF_FUNC_fib_lookup:
 		return &bpf_xdp_fib_lookup_proto;
+	case BPF_FUNC_get_skb_hash:
+		return &bpf_get_skb_hash_proto;
 #ifdef CONFIG_INET
 	case BPF_FUNC_sk_lookup_udp:
 		return &bpf_xdp_sk_lookup_udp_proto;
