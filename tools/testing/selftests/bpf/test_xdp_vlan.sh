@@ -220,7 +220,7 @@ ip netns exec ns1 ping -i 0.2 -W 2 -c 2 $IPADDR2
 # ETH_P_8021Q indication, and this cause overwriting of our changes.
 #
 export XDP_PROG=xdp_vlan_remove_outer2
-ip netns exec ns1 ip link set $DEVNS1 $XDP_MODE off
+ip netns exec ns1 ip -force link set $DEVNS1 $XDP_MODE off
 ip netns exec ns1 ip link set $DEVNS1 $XDP_MODE object $FILE section $XDP_PROG
 
 # Now the namespaces should still be able reach each-other, test with ping:
