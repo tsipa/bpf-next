@@ -1355,7 +1355,6 @@ __htab_map_lookup_and_delete_batch(struct bpf_map *map,
 	struct hlist_nulls_head *head;
 	struct hlist_nulls_node *n;
 	unsigned long flags = 0;
-	bool locked = false;
 	struct htab_elem *l;
 	struct bucket *b;
 	int ret = 0;
@@ -1414,18 +1413,18 @@ again_nocopy:
 	dst_val = values;
 	b = &htab->buckets[batch];
 	head = &b->head;
-	/* do not grab the lock unless need it (bucket_cnt > 0). */
-	if (locked)
-		flags = htab_lock_bucket(htab, b);
 
+	l = hlist_nulls_entry_safe(rcu_dereference_raw(hlist_nulls_first_rcu(head)),
+					struct htab_elem, hash_node);
+	if (!l && (batch + 1 < htab->n_buckets)) {
+		batch++;
+		goto again_nocopy;
+	}
+
+	flags = htab_lock_bucket(htab, b);
 	bucket_cnt = 0;
 	hlist_nulls_for_each_entry_rcu(l, n, head, hash_node)
 		bucket_cnt++;
-
-	if (bucket_cnt && !locked) {
-		locked = true;
-		goto again_nocopy;
-	}
 
 	if (bucket_cnt > (max_count - total)) {
 		if (total == 0)
@@ -1451,10 +1450,6 @@ again_nocopy:
 		kvfree(values);
 		goto alloc;
 	}
-
-	/* Next block is only safe to run if you have grabbed the lock */
-	if (!locked)
-		goto next_batch;
 
 	hlist_nulls_for_each_entry_safe(l, n, head, hash_node) {
 		memcpy(dst_key, l->key, key_size);
@@ -1498,7 +1493,6 @@ again_nocopy:
 	}
 
 	htab_unlock_bucket(htab, b, flags);
-	locked = false;
 
 	while (node_to_free) {
 		l = node_to_free;
@@ -1506,7 +1500,6 @@ again_nocopy:
 		bpf_lru_push_free(&htab->lru, &l->lru_node);
 	}
 
-next_batch:
 	/* If we are not copying data, we can go to next bucket and avoid
 	 * unlocking the rcu.
 	 */
