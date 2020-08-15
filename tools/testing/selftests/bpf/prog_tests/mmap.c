@@ -183,15 +183,22 @@ void test_mmap(void)
 
 	/* check some more advanced mmap() manipulations */
 
-	/* map all but last page: pages 1-3 mapped */
-	tmp1 = mmap(NULL, 3 * page_size, PROT_READ, MAP_SHARED,
+	/* map all 4 pages */
+	tmp1 = mmap(NULL, 4 * page_size, PROT_READ, MAP_SHARED,
 			  data_map_fd, 0);
 	if (CHECK(tmp1 == MAP_FAILED, "adv_mmap1", "errno %d\n", errno))
 		goto cleanup;
 
-	/* unmap second page: pages 1, 3 mapped */
+	/* unmap second page: pages 1, 3, 4 mapped */
 	err = munmap(tmp1 + page_size, page_size);
 	if (CHECK(err, "adv_mmap2", "errno %d\n", errno)) {
+		munmap(tmp1, map_sz);
+		goto cleanup;
+	}
+
+	/* unmap forth page: pages 1, 3 mapped */
+	err = munmap(tmp1 + (3 * page_size), page_size);
+	if (CHECK(err, "adv_mmap3", "errno %d\n", errno)) {
 		munmap(tmp1, map_sz);
 		goto cleanup;
 	}
@@ -199,22 +206,22 @@ void test_mmap(void)
 	/* map page 2 back */
 	tmp2 = mmap(tmp1 + page_size, page_size, PROT_READ,
 		    MAP_SHARED | MAP_FIXED, data_map_fd, 0);
-	if (CHECK(tmp2 == MAP_FAILED, "adv_mmap3", "errno %d\n", errno)) {
+	if (CHECK(tmp2 == MAP_FAILED, "adv_mmap4", "errno %d\n", errno)) {
 		munmap(tmp1, page_size);
 		munmap(tmp1 + 2*page_size, page_size);
 		goto cleanup;
 	}
-	CHECK(tmp1 + page_size != tmp2, "adv_mmap4",
+	CHECK(tmp1 + page_size != tmp2, "adv_mmap5",
 	      "tmp1: %p, tmp2: %p\n", tmp1, tmp2);
 
 	/* re-map all 4 pages */
 	tmp2 = mmap(tmp1, 4 * page_size, PROT_READ, MAP_SHARED | MAP_FIXED,
 		    data_map_fd, 0);
-	if (CHECK(tmp2 == MAP_FAILED, "adv_mmap5", "errno %d\n", errno)) {
+	if (CHECK(tmp2 == MAP_FAILED, "adv_mmap6", "errno %d\n", errno)) {
 		munmap(tmp1, 3 * page_size); /* unmap page 1 */
 		goto cleanup;
 	}
-	CHECK(tmp1 != tmp2, "adv_mmap6", "tmp1: %p, tmp2: %p\n", tmp1, tmp2);
+	CHECK(tmp1 != tmp2, "adv_mmap7", "tmp1: %p, tmp2: %p\n", tmp1, tmp2);
 
 	map_data = tmp2;
 	CHECK_FAIL(bss_data->in_val != 321);
@@ -231,7 +238,7 @@ void test_mmap(void)
 	/* map all 4 pages, but with pg_off=1 page, should fail */
 	tmp1 = mmap(NULL, 4 * page_size, PROT_READ, MAP_SHARED | MAP_FIXED,
 		    data_map_fd, page_size /* initial page shift */);
-	if (CHECK(tmp1 != MAP_FAILED, "adv_mmap7", "unexpected success")) {
+	if (CHECK(tmp1 != MAP_FAILED, "adv_mmap8", "unexpected success")) {
 		munmap(tmp1, 4 * page_size);
 		goto cleanup;
 	}
