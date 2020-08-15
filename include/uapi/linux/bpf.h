@@ -3394,6 +3394,12 @@ union bpf_attr {
  *		A non-negative value equal to or less than *size* on success,
  *		or a negative error in case of failure.
  *
+ * u64 bpf_ktime_get_real_ns(void)
+ *      Description
+ *              Return the real time in nanoseconds.
+ *              See: **clock_gettime**\ (**CLOCK_REALTIME**)
+ *      Return
+ *              Current *ktime*.
  */
 #define __BPF_FUNC_MAPPER(FN)		\
 	FN(unspec),			\
@@ -3538,6 +3544,7 @@ union bpf_attr {
 	FN(skc_to_tcp_request_sock),	\
 	FN(skc_to_udp6_sock),		\
 	FN(get_task_stack),		\
+	FN(ktime_get_real_ns),		\
 	/* */
 
 /* integer value in 'imm' field of BPF_CALL instruction selects which helper
