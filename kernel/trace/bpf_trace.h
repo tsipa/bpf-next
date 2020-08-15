@@ -10,16 +10,18 @@
 
 TRACE_EVENT(bpf_trace_printk,
 
-	TP_PROTO(const char *bpf_string),
+	TP_PROTO(const char *bpf_string, __u32 trace_id),
 
-	TP_ARGS(bpf_string),
+	TP_ARGS(bpf_string, trace_id),
 
 	TP_STRUCT__entry(
 		__string(bpf_string, bpf_string)
+		__field(__u32, trace_id)
 	),
 
 	TP_fast_assign(
 		__assign_str(bpf_string, bpf_string);
+		__entry->trace_id = trace_id;
 	),
 
 	TP_printk("%s", __get_str(bpf_string))

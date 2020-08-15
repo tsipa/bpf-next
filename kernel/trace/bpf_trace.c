@@ -383,22 +383,31 @@ static DEFINE_RAW_SPINLOCK(trace_printk_lock);
 
 #define BPF_TRACE_PRINTK_SIZE   1024
 
-static inline __printf(1, 0) int bpf_do_trace_printk(const char *fmt, ...)
+int bpf_trace_vprintk(__u32 trace_id, const char *fmt, va_list ap)
 {
 	static char buf[BPF_TRACE_PRINTK_SIZE];
 	unsigned long flags;
-	va_list ap;
 	int ret;
 
 	raw_spin_lock_irqsave(&trace_printk_lock, flags);
-	va_start(ap, fmt);
 	ret = vsnprintf(buf, sizeof(buf), fmt, ap);
-	va_end(ap);
 	/* vsnprintf() will not append null for zero-length strings */
 	if (ret == 0)
 		buf[0] = '\0';
-	trace_bpf_trace_printk(buf);
+	trace_bpf_trace_printk(buf, trace_id);
 	raw_spin_unlock_irqrestore(&trace_printk_lock, flags);
+
+	return ret;
+}
+
+static __printf(1, 0) int bpf_do_trace_printk(const char *fmt, ...)
+{
+	va_list ap;
+	int ret;
+
+	va_start(ap, fmt);
+	ret = bpf_trace_vprintk(0, fmt, ap);
+	va_end(ap);
 
 	return ret;
 }

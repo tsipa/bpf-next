@@ -946,6 +946,8 @@ typedef u32 (*bpf_convert_ctx_access_t)(enum bpf_access_type type,
 u64 bpf_event_output(struct bpf_map *map, u64 flags, void *meta, u64 meta_size,
 		     void *ctx, u64 ctx_size, bpf_ctx_copy_t ctx_copy);
 
+int bpf_trace_vprintk(__u32 trace_id, const char *fmt, va_list ap);
+
 /* an array of programs to be executed under rcu_lock.
  *
  * Typical usage:
