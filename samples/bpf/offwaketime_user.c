@@ -95,12 +95,10 @@ static void int_exit(int sig)
 
 int main(int argc, char **argv)
 {
-	struct rlimit r = {RLIM_INFINITY, RLIM_INFINITY};
 	char filename[256];
 	int delay = 1;
 
 	snprintf(filename, sizeof(filename), "%s_kern.o", argv[0]);
-	setrlimit(RLIMIT_MEMLOCK, &r);
 
 	signal(SIGINT, int_exit);
 	signal(SIGTERM, int_exit);
