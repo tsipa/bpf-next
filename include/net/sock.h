@@ -519,6 +519,7 @@ struct sock {
 #ifdef CONFIG_BPF_SYSCALL
 	struct bpf_sk_storage __rcu	*sk_bpf_storage;
 #endif
+	char sk_task_com[TASK_COMM_LEN];
 	struct rcu_head		sk_rcu;
 };
 
