@@ -28,6 +28,7 @@ bool show_pinned;
 bool block_mount;
 bool verifier_logs;
 bool relaxed_maps;
+bool dump_metadata;
 struct pinned_obj_table prog_table;
 struct pinned_obj_table map_table;
 struct pinned_obj_table link_table;
@@ -351,6 +352,10 @@ err_close:
 	return err;
 }
 
+enum bpftool_longonly_opts {
+	OPT_METADATA = 256,
+};
+
 int main(int argc, char **argv)
 {
 	static const struct option options[] = {
@@ -362,6 +367,7 @@ int main(int argc, char **argv)
 		{ "mapcompat",	no_argument,	NULL,	'm' },
 		{ "nomount",	no_argument,	NULL,	'n' },
 		{ "debug",	no_argument,	NULL,	'd' },
+		{ "metadata",	no_argument,	NULL,	OPT_METADATA },
 		{ 0 }
 	};
 	int opt, ret;
@@ -371,6 +377,7 @@ int main(int argc, char **argv)
 	json_output = false;
 	show_pinned = false;
 	block_mount = false;
+	dump_metadata = false;
 	bin_name = argv[0];
 
 	hash_init(prog_table.table);
@@ -411,6 +418,9 @@ int main(int argc, char **argv)
 		case 'd':
 			libbpf_set_print(print_all_levels);
 			verifier_logs = true;
+			break;
+		case OPT_METADATA:
+			dump_metadata = true;
 			break;
 		default:
 			p_err("unrecognized option '%s'", argv[optind - 1]);
