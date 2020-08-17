@@ -4144,6 +4144,86 @@ static int bpf_iter_create(union bpf_attr *attr)
 	return err;
 }
 
+#define BPF_PROG_ADD_MAP_LAST_FIELD prog_add_map.flags
+
+static void __bpf_free_used_maps_rcu(struct rcu_head *rcu)
+{
+	struct bpf_used_maps *used_maps = container_of(rcu, struct bpf_used_maps, rcu);
+
+	kfree(used_maps->arr);
+	kfree(used_maps);
+}
+
+static int bpf_prog_add_map(union bpf_attr *attr)
+{
+	struct bpf_prog *prog;
+	struct bpf_map *map;
+	struct bpf_used_maps *used_maps_old, *used_maps_new;
+	int i, ret = 0;
+
+	if (CHECK_ATTR(BPF_PROG_ADD_MAP))
+		return -EINVAL;
+
+	if (attr->prog_add_map.flags)
+		return -EINVAL;
+
+	prog = bpf_prog_get(attr->prog_add_map.prog_fd);
+	if (IS_ERR(prog))
+		return PTR_ERR(prog);
+
+	map = bpf_map_get(attr->prog_add_map.map_fd);
+	if (IS_ERR(map)) {
+		ret = PTR_ERR(map);
+		goto out_prog_put;
+	}
+
+	used_maps_new = kzalloc(sizeof(*used_maps_new), GFP_KERNEL);
+	if (!used_maps_new) {
+		ret = -ENOMEM;
+		goto out_map_put;
+	}
+
+	mutex_lock(&prog->aux->used_maps_mutex);
+
+	used_maps_old = rcu_dereference_protected(prog->aux->used_maps,
+				lockdep_is_held(&prog->aux->used_maps_mutex));
+
+	for (i = 0; i < used_maps_old->cnt; i++)
+		if (used_maps_old->arr[i] == map) {
+			ret = -EEXIST;
+			goto out_unlock;
+		}
+
+	used_maps_new->cnt = used_maps_old->cnt + 1;
+	used_maps_new->arr = kmalloc_array(used_maps_new->cnt,
+					   sizeof(used_maps_new->arr[0]),
+					   GFP_KERNEL);
+	if (!used_maps_new->arr) {
+		ret = -ENOMEM;
+		goto out_unlock;
+	}
+
+	memcpy(used_maps_new->arr, used_maps_old->arr,
+	       sizeof(used_maps_old->arr[0]) * used_maps_old->cnt);
+	used_maps_new->arr[used_maps_old->cnt] = map;
+
+	rcu_assign_pointer(prog->aux->used_maps, used_maps_new);
+	call_rcu(&used_maps_old->rcu, __bpf_free_used_maps_rcu);
+
+out_unlock:
+	mutex_unlock(&prog->aux->used_maps_mutex);
+
+	if (ret)
+		kfree(used_maps_new);
+
+out_map_put:
+	if (ret)
+		bpf_map_put(map);
+out_prog_put:
+	bpf_prog_put(prog);
+	return ret;
+}
+
 SYSCALL_DEFINE3(bpf, int, cmd, union bpf_attr __user *, uattr, unsigned int, size)
 {
 	union bpf_attr attr;
@@ -4276,6 +4356,9 @@ SYSCALL_DEFINE3(bpf, int, cmd, union bpf_attr __user *, uattr, unsigned int, siz
 		break;
 	case BPF_LINK_DETACH:
 		err = link_detach(&attr);
+		break;
+	case BPF_PROG_ADD_MAP:
+		err = bpf_prog_add_map(&attr);
 		break;
 	default:
 		err = -EINVAL;
