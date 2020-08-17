@@ -5439,17 +5439,23 @@ static int generic_xdp_install(struct net_device *dev, struct netdev_bpf *xdp)
 	int ret = 0;
 
 	if (new) {
+		const struct bpf_used_maps *used_maps;
 		u32 i;
+
+		rcu_read_lock();
+		used_maps = rcu_dereference(new->aux->used_maps);
 
 		/* generic XDP does not work with DEVMAPs that can
 		 * have a bpf_prog installed on an entry
 		 */
-		for (i = 0; i < new->aux->used_map_cnt; i++) {
-			if (dev_map_can_have_prog(new->aux->used_maps[i]))
+		for (i = 0; i < used_maps->cnt; i++) {
+			if (dev_map_can_have_prog(used_maps->arr[i]))
 				return -EINVAL;
-			if (cpu_map_prog_allowed(new->aux->used_maps[i]))
+			if (cpu_map_prog_allowed(used_maps->arr[i]))
 				return -EINVAL;
 		}
+
+		rcu_read_unlock();
 	}
 
 	switch (xdp->command) {
