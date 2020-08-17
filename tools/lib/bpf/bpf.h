@@ -240,6 +240,7 @@ LIBBPF_API int bpf_task_fd_query(int pid, int fd, __u32 flags, char *buf,
 enum bpf_stats_type; /* defined in up-to-date linux/bpf.h */
 LIBBPF_API int bpf_enable_stats(enum bpf_stats_type type);
 
+LIBBPF_API int bpf_prog_add_map(int prog_fd, int map_fd, int flags);
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

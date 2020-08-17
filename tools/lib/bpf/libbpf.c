@@ -180,6 +180,8 @@ struct bpf_capabilities {
 	__u32 btf_func_global:1;
 	/* kernel support for expected_attach_type in BPF_PROG_LOAD */
 	__u32 exp_attach_type:1;
+	/* kernel support for BPF_PROG_ADD_MAP */
+	__u32 prog_add_map:1;
 };
 
 enum reloc_type {
@@ -288,6 +290,7 @@ struct bpf_struct_ops {
 #define KCONFIG_SEC ".kconfig"
 #define KSYMS_SEC ".ksyms"
 #define STRUCT_OPS_SEC ".struct_ops"
+#define METADATA_SEC ".metadata"
 
 enum libbpf_map_type {
 	LIBBPF_MAP_UNSPEC,
@@ -295,6 +298,7 @@ enum libbpf_map_type {
 	LIBBPF_MAP_BSS,
 	LIBBPF_MAP_RODATA,
 	LIBBPF_MAP_KCONFIG,
+	LIBBPF_MAP_METADATA,
 };
 
 static const char * const libbpf_type_to_btf_name[] = {
@@ -302,6 +306,7 @@ static const char * const libbpf_type_to_btf_name[] = {
 	[LIBBPF_MAP_BSS]	= BSS_SEC,
 	[LIBBPF_MAP_RODATA]	= RODATA_SEC,
 	[LIBBPF_MAP_KCONFIG]	= KCONFIG_SEC,
+	[LIBBPF_MAP_METADATA]	= METADATA_SEC,
 };
 
 struct bpf_map {
@@ -380,6 +385,8 @@ struct bpf_object {
 	size_t nr_maps;
 	size_t maps_cap;
 
+	struct bpf_map *metadata_map;
+
 	char *kconfig;
 	struct extern_desc *externs;
 	int nr_extern;
@@ -403,6 +410,7 @@ struct bpf_object {
 		Elf_Data *rodata;
 		Elf_Data *bss;
 		Elf_Data *st_ops_data;
+		Elf_Data *metadata;
 		size_t strtabidx;
 		struct {
 			GElf_Shdr shdr;
@@ -418,6 +426,7 @@ struct bpf_object {
 		int rodata_shndx;
 		int bss_shndx;
 		int st_ops_shndx;
+		int metadata_shndx;
 	} efile;
 	/*
 	 * All loaded bpf_object is linked in a list, which is
@@ -1030,6 +1039,7 @@ static struct bpf_object *bpf_object__new(const char *path,
 	obj->efile.obj_buf_sz = obj_buf_sz;
 	obj->efile.maps_shndx = -1;
 	obj->efile.btf_maps_shndx = -1;
+	obj->efile.metadata_shndx = -1;
 	obj->efile.data_shndx = -1;
 	obj->efile.rodata_shndx = -1;
 	obj->efile.bss_shndx = -1;
@@ -1391,6 +1401,9 @@ bpf_object__init_internal_map(struct bpf_object *obj, enum libbpf_map_type type,
 	if (data)
 		memcpy(map->mmaped, data, data_sz);
 
+	if (type == LIBBPF_MAP_METADATA)
+		obj->metadata_map = map;
+
 	pr_debug("map %td is \"%s\"\n", map - obj->maps, map->name);
 	return 0;
 }
@@ -1423,6 +1436,14 @@ static int bpf_object__init_global_data_maps(struct bpf_object *obj)
 						    obj->efile.bss_shndx,
 						    NULL,
 						    obj->efile.bss->d_size);
+		if (err)
+			return err;
+	}
+	if (obj->efile.metadata_shndx >= 0) {
+		err = bpf_object__init_internal_map(obj, LIBBPF_MAP_METADATA,
+						    obj->efile.metadata_shndx,
+						    obj->efile.metadata->d_buf,
+						    obj->efile.metadata->d_size);
 		if (err)
 			return err;
 	}
@@ -2665,6 +2686,9 @@ static int bpf_object__elf_collect(struct bpf_object *obj)
 			} else if (strcmp(name, STRUCT_OPS_SEC) == 0) {
 				obj->efile.st_ops_data = data;
 				obj->efile.st_ops_shndx = idx;
+			} else if (strcmp(name, METADATA_SEC) == 0) {
+				obj->efile.metadata = data;
+				obj->efile.metadata_shndx = idx;
 			} else {
 				pr_debug("skip section(%d) %s\n", idx, name);
 			}
@@ -3078,7 +3102,8 @@ static bool bpf_object__shndx_is_data(const struct bpf_object *obj,
 {
 	return shndx == obj->efile.data_shndx ||
 	       shndx == obj->efile.bss_shndx ||
-	       shndx == obj->efile.rodata_shndx;
+	       shndx == obj->efile.rodata_shndx ||
+	       shndx == obj->efile.metadata_shndx;
 }
 
 static bool bpf_object__shndx_is_maps(const struct bpf_object *obj,
@@ -3099,6 +3124,8 @@ bpf_object__section_to_libbpf_map_type(const struct bpf_object *obj, int shndx)
 		return LIBBPF_MAP_RODATA;
 	else if (shndx == obj->efile.symbols_shndx)
 		return LIBBPF_MAP_KCONFIG;
+	else if (shndx == obj->efile.metadata_shndx)
+		return LIBBPF_MAP_METADATA;
 	else
 		return LIBBPF_MAP_UNSPEC;
 }
@@ -3634,6 +3661,59 @@ bpf_object__probe_exp_attach_type(struct bpf_object *obj)
 }
 
 static int
+bpf_object__probe_prog_add_map(struct bpf_object *obj)
+{
+	struct bpf_load_program_attr prog_attr;
+	struct bpf_create_map_attr map_attr;
+	char *cp, errmsg[STRERR_BUFSIZE];
+	struct bpf_insn insns[] = {
+		BPF_MOV64_IMM(BPF_REG_0, 0),
+		BPF_EXIT_INSN(),
+	};
+	int prog, map;
+
+	if (!obj->caps.global_data)
+		return 0;
+
+	memset(&map_attr, 0, sizeof(map_attr));
+	map_attr.map_type = BPF_MAP_TYPE_ARRAY;
+	map_attr.key_size = sizeof(int);
+	map_attr.value_size = 32;
+	map_attr.max_entries = 1;
+
+	map = bpf_create_map_xattr(&map_attr);
+	if (map < 0) {
+		cp = libbpf_strerror_r(errno, errmsg, sizeof(errmsg));
+		pr_warn("Error in %s():%s(%d). Couldn't create simple array map.\n",
+			__func__, cp, errno);
+		return -errno;
+	}
+
+	memset(&prog_attr, 0, sizeof(prog_attr));
+	prog_attr.prog_type = BPF_PROG_TYPE_SOCKET_FILTER;
+	prog_attr.insns = insns;
+	prog_attr.insns_cnt = ARRAY_SIZE(insns);
+	prog_attr.license = "GPL";
+
+	prog = bpf_load_program_xattr(&prog_attr, NULL, 0);
+	if (prog < 0) {
+		cp = libbpf_strerror_r(errno, errmsg, sizeof(errmsg));
+		pr_warn("Error in %s():%s(%d). Couldn't create simple program.\n",
+			__func__, cp, errno);
+
+		close(map);
+		return -errno;
+	}
+
+	if (!bpf_prog_add_map(prog, map, 0))
+		obj->caps.prog_add_map = 1;
+
+	close(map);
+	close(prog);
+	return 0;
+}
+
+static int
 bpf_object__probe_caps(struct bpf_object *obj)
 {
 	int (*probe_fn[])(struct bpf_object *obj) = {
@@ -3644,6 +3724,7 @@ bpf_object__probe_caps(struct bpf_object *obj)
 		bpf_object__probe_btf_datasec,
 		bpf_object__probe_array_mmap,
 		bpf_object__probe_exp_attach_type,
+		bpf_object__probe_prog_add_map,
 	};
 	int i, ret;
 
@@ -5404,6 +5485,20 @@ retry_load:
 	if (ret >= 0) {
 		if (log_buf && load_attr.log_level)
 			pr_debug("verifier log:\n%s", log_buf);
+
+		if (prog->obj->metadata_map && prog->obj->caps.prog_add_map) {
+			if (bpf_prog_add_map(ret, bpf_map__fd(prog->obj->metadata_map), 0) &&
+			    errno != EEXIST) {
+				int fd = ret;
+
+				ret = -errno;
+				cp = libbpf_strerror_r(errno, errmsg, sizeof(errmsg));
+				pr_warn("add metadata map failed: %s\n", cp);
+				close(fd);
+				goto out;
+			}
+		}
+
 		*pfd = ret;
 		ret = 0;
 		goto out;
