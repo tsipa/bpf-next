@@ -184,18 +184,24 @@ static int load_and_attach(const char *event, struct bpf_insn *prog, int size)
 
 #ifdef __x86_64__
 		if (strncmp(event, "sys_", 4) == 0) {
-			snprintf(buf, sizeof(buf), "%c:__x64_%s __x64_%s",
-				is_kprobe ? 'p' : 'r', event, event);
+			if (is_kprobe)
+				event_prefix = "__x64_enter_";
+			else
+				event_prefix = "__x64_exit_";
+			snprintf(buf, sizeof(buf), "%c:%s%s __x64_%s",
+				is_kprobe ? 'p' : 'r', event_prefix, event, event);
 			err = write_kprobe_events(buf);
-			if (err >= 0) {
+			if (err >= 0)
 				need_normal_check = false;
-				event_prefix = "__x64_";
-			}
 		}
 #endif
 		if (need_normal_check) {
-			snprintf(buf, sizeof(buf), "%c:%s %s",
-				is_kprobe ? 'p' : 'r', event, event);
+			if (is_kprobe)
+				event_prefix = "enter_";
+			else
+				event_prefix = "exit_";
+			snprintf(buf, sizeof(buf), "%c:%s%s %s",
+				is_kprobe ? 'p' : 'r', event_prefix, event, event);
 			err = write_kprobe_events(buf);
 			if (err < 0) {
 				printf("failed to create kprobe '%s' error '%s'\n",
