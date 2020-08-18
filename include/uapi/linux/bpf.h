@@ -3395,6 +3395,13 @@ union bpf_attr {
  *		A non-negative value equal to or less than *size* on success,
  *		or a negative error in case of failure.
  *
+ * u32 bpf_get_skb_hash(struct xdp_buff *xdp_md)
+ *	Description
+ *		Return the skb hash for the xdp context passed. This function
+ *		allocates a temporary skb and populates the fields needed. It
+ *		then calls skb_get_hash to calculate the skb hash for the packet.
+ *	Return
+ *		The 32-bit hash.
  */
 #define __BPF_FUNC_MAPPER(FN)		\
 	FN(unspec),			\
@@ -3539,6 +3546,7 @@ union bpf_attr {
 	FN(skc_to_tcp_request_sock),	\
 	FN(skc_to_udp6_sock),		\
 	FN(get_task_stack),		\
+	FN(get_skb_hash),		\
 	/* */
 
 /* integer value in 'imm' field of BPF_CALL instruction selects which helper
