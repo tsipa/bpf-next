@@ -875,3 +875,14 @@ int bpf_enable_stats(enum bpf_stats_type type)
 
 	return sys_bpf(BPF_ENABLE_STATS, &attr, sizeof(attr));
 }
+
+int bpf_prog_add_map(int prog_fd, int map_fd, int flags)
+{
+	union bpf_attr attr = {};
+
+	attr.prog_add_map.prog_fd = prog_fd;
+	attr.prog_add_map.map_fd = map_fd;
+	attr.prog_add_map.flags = flags;
+
+	return sys_bpf(BPF_PROG_ADD_MAP, &attr, sizeof(attr));
+}
