@@ -3539,6 +3539,7 @@ union bpf_attr {
 	FN(skc_to_tcp_request_sock),	\
 	FN(skc_to_udp6_sock),		\
 	FN(get_task_stack),		\
+	FN(skb_get_sock_comm),		\
 	/* */
 
 /* integer value in 'imm' field of BPF_CALL instruction selects which helper

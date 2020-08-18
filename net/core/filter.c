@@ -4313,6 +4313,36 @@ static const struct bpf_func_proto bpf_get_socket_uid_proto = {
 	.arg1_type      = ARG_PTR_TO_CTX,
 };
 
+BPF_CALL_3(bpf_skb_get_sock_comm,     struct sk_buff *, skb, char *, buf, u32, size)
+{
+	struct sock *sk;
+
+	if (!buf || 0 == size)
+		return -EINVAL;
+
+	sk = sk_to_full_sk(skb->sk);
+	if (!sk || !sk_fullsock(sk))
+		goto err_clear;
+
+	memcpy(buf, sk->sk_task_com, size);
+	buf[size - 1] = 0;
+	return 0;
+
+err_clear:
+	memset(buf, 0, size);
+	buf[size - 1] = 0;
+	return -ENOENT;
+}
+
+const struct bpf_func_proto bpf_skb_get_sock_comm_proto = {
+	.func           = bpf_skb_get_sock_comm,
+	.gpl_only       = false,
+	.ret_type       = RET_INTEGER,
+	.arg1_type      = ARG_PTR_TO_CTX,
+	.arg2_type      = ARG_PTR_TO_MEM,
+	.arg3_type      = ARG_CONST_SIZE,
+};
+
 #define SOCKOPT_CC_REINIT (1 << 0)
 
 static int _bpf_setsockopt(struct sock *sk, int level, int optname,
@@ -6313,6 +6343,8 @@ sk_filter_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 		return &bpf_get_socket_cookie_proto;
 	case BPF_FUNC_get_socket_uid:
 		return &bpf_get_socket_uid_proto;
+	case BPF_FUNC_skb_get_sock_comm:
+		return &bpf_skb_get_sock_comm_proto;
 	case BPF_FUNC_perf_event_output:
 		return &bpf_skb_event_output_proto;
 	default:

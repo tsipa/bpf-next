@@ -2961,6 +2961,24 @@ void sk_stop_timer(struct sock *sk, struct timer_list* timer)
 }
 EXPORT_SYMBOL(sk_stop_timer);
 
+void sock_init_task_comm(struct sock *sk)
+{
+	struct pid *pid = NULL;
+	struct task_struct *tgid_task = NULL;
+
+	pid = find_get_pid(current->tgid);
+	if (pid) {
+		tgid_task = get_pid_task(pid, PIDTYPE_PID);
+
+		if (tgid_task) {
+			snprintf(sk->sk_task_com, TASK_COMM_LEN, tgid_task->comm);
+			put_task_struct(tgid_task);
+		}
+
+		put_pid(pid);
+	}
+}
+
 void sock_init_data(struct socket *sock, struct sock *sk)
 {
 	sk_init_common(sk);
@@ -3030,6 +3048,8 @@ void sock_init_data(struct socket *sock, struct sock *sk)
 	sk->sk_pacing_rate = ~0UL;
 	WRITE_ONCE(sk->sk_pacing_shift, 10);
 	sk->sk_incoming_cpu = -1;
+
+	sock_init_task_comm(sk);
 
 	sk_rx_queue_clear(sk);
 	/*
