@@ -58,12 +58,25 @@ def default_iface(f):
     return wrapper
 
 
+def make_bpftool(clean=False):
+    cmd = "make"
+    if clean:
+        cmd = "make clean"
+    return subprocess.run(cmd, shell=True, cwd=bpftool_dir, check=True,
+                          stdout=subprocess.DEVNULL)
+
 class TestBpftool(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if os.getuid() != 0:
             raise UnprivilegedUserError(
                 "This test suite needs root privileges")
+        if subprocess.getstatusoutput("bpftool -h")[0]:
+            make_bpftool()
+
+    @classmethod
+    def tearDownClass(cls):
+        make_bpftool(clean=True)
 
     @default_iface
     def test_feature_dev_json(self, iface):
