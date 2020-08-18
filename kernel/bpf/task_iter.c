@@ -27,6 +27,8 @@ static struct task_struct *task_seq_get_next(struct pid_namespace *ns,
 	struct task_struct *task = NULL;
 	struct pid *pid;
 
+	cond_resched();
+
 	rcu_read_lock();
 retry:
 	pid = idr_get_next(&ns->idr, tid);
@@ -136,6 +138,8 @@ task_file_seq_get_next(struct bpf_iter_seq_task_file_info *info,
 	struct files_struct *curr_files;
 	struct task_struct *curr_task;
 	int curr_fd = info->fd;
+
+	cond_resched();
 
 	/* If this function returns a non-NULL file object,
 	 * it held a reference to the task/files_struct/file.
