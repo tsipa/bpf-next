@@ -689,9 +689,15 @@ struct bpf_ctx_arg_aux {
 	u32 btf_id;
 };
 
+/* rcu struct for prog used_maps */
+struct bpf_used_maps {
+	u32 cnt;
+	struct bpf_map **arr;
+	struct rcu_head rcu;
+};
+
 struct bpf_prog_aux {
 	atomic64_t refcnt;
-	u32 used_map_cnt;
 	u32 max_ctx_offset;
 	u32 max_pkt_offset;
 	u32 max_tp_access;
@@ -722,7 +728,8 @@ struct bpf_prog_aux {
 	u32 size_poke_tab;
 	struct bpf_ksym ksym;
 	const struct bpf_prog_ops *ops;
-	struct bpf_map **used_maps;
+	struct mutex used_maps_mutex; /* write-side mutex for used_maps */
+	struct bpf_used_maps __rcu *used_maps;
 	struct bpf_prog *prog;
 	struct user_struct *user;
 	u64 load_time; /* ns since boottime */

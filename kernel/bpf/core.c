@@ -1746,11 +1746,16 @@ bool bpf_prog_array_compatible(struct bpf_array *array,
 
 static int bpf_check_tail_call(const struct bpf_prog *fp)
 {
-	struct bpf_prog_aux *aux = fp->aux;
+	const struct bpf_used_maps *used_maps;
 	int i;
 
-	for (i = 0; i < aux->used_map_cnt; i++) {
-		struct bpf_map *map = aux->used_maps[i];
+	rcu_read_lock();
+	used_maps = rcu_dereference(fp->aux->used_maps);
+	if (!used_maps)
+		goto out;
+
+	for (i = 0; i < used_maps->cnt; i++) {
+		struct bpf_map *map = used_maps->arr[i];
 		struct bpf_array *array;
 
 		if (map->map_type != BPF_MAP_TYPE_PROG_ARRAY)
@@ -1761,6 +1766,8 @@ static int bpf_check_tail_call(const struct bpf_prog *fp)
 			return -EINVAL;
 	}
 
+out:
+	rcu_read_unlock();
 	return 0;
 }
 
@@ -2113,8 +2120,16 @@ void __bpf_free_used_maps(struct bpf_prog_aux *aux,
 
 static void bpf_free_used_maps(struct bpf_prog_aux *aux)
 {
-	__bpf_free_used_maps(aux, aux->used_maps, aux->used_map_cnt);
-	kfree(aux->used_maps);
+	struct bpf_used_maps *used_maps = aux->used_maps;
+
+	if (!used_maps)
+		return;
+
+	__bpf_free_used_maps(aux, used_maps->arr, used_maps->cnt);
+	kfree(used_maps->arr);
+	kfree(used_maps);
+
+	mutex_destroy(&aux->used_maps_mutex);
 }
 
 static void bpf_prog_free_deferred(struct work_struct *work)
