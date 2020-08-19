@@ -3149,11 +3149,15 @@ static const struct bpf_map *bpf_map_from_imm(const struct bpf_prog *prog,
 					      unsigned long addr, u32 *off,
 					      u32 *type)
 {
+	const struct bpf_used_maps *used_maps;
 	const struct bpf_map *map;
 	int i;
 
-	for (i = 0, *off = 0; i < prog->aux->used_map_cnt; i++) {
-		map = prog->aux->used_maps[i];
+	rcu_read_lock();
+	used_maps = rcu_dereference(prog->aux->used_maps);
+
+	for (i = 0, *off = 0; i < used_maps->cnt; i++) {
+		map = used_maps->arr[i];
 		if (map == (void *)addr) {
 			*type = BPF_PSEUDO_MAP_FD;
 			return map;
@@ -3166,6 +3170,7 @@ static const struct bpf_map *bpf_map_from_imm(const struct bpf_prog *prog,
 		}
 	}
 
+	rcu_read_unlock();
 	return NULL;
 }
 
@@ -3263,6 +3268,7 @@ static int bpf_prog_get_info_by_fd(struct file *file,
 	struct bpf_prog_stats stats;
 	char __user *uinsns;
 	u32 ulen;
+	const struct bpf_used_maps *used_maps;
 	int err;
 
 	err = bpf_check_uarg_tail_zero(uinfo, sizeof(info), info_len);
@@ -3284,18 +3290,23 @@ static int bpf_prog_get_info_by_fd(struct file *file,
 	memcpy(info.tag, prog->tag, sizeof(prog->tag));
 	memcpy(info.name, prog->aux->name, sizeof(prog->aux->name));
 
+	rcu_read_lock();
+	used_maps = rcu_dereference(prog->aux->used_maps);
+
 	ulen = info.nr_map_ids;
-	info.nr_map_ids = prog->aux->used_map_cnt;
+	info.nr_map_ids = used_maps->cnt;
 	ulen = min_t(u32, info.nr_map_ids, ulen);
 	if (ulen) {
 		u32 __user *user_map_ids = u64_to_user_ptr(info.map_ids);
 		u32 i;
 
 		for (i = 0; i < ulen; i++)
-			if (put_user(prog->aux->used_maps[i]->id,
+			if (put_user(used_maps->arr[i]->id,
 				     &user_map_ids[i]))
 				return -EFAULT;
 	}
+
+	rcu_read_unlock();
 
 	err = set_info_rec_size(&info);
 	if (err)

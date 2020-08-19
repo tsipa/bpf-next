@@ -11232,25 +11232,38 @@ skip_full_check:
 		goto err_release_maps;
 	}
 
-	if (ret == 0 && env->used_map_cnt) {
+	if (ret == 0) {
 		/* if program passed verifier, update used_maps in bpf_prog_info */
-		env->prog->aux->used_maps = kmalloc_array(env->used_map_cnt,
-							  sizeof(env->used_maps[0]),
+		struct bpf_used_maps *used_maps = kzalloc(sizeof(*used_maps),
 							  GFP_KERNEL);
-
-		if (!env->prog->aux->used_maps) {
+		if (!used_maps) {
 			ret = -ENOMEM;
 			goto err_release_maps;
 		}
 
-		memcpy(env->prog->aux->used_maps, env->used_maps,
-		       sizeof(env->used_maps[0]) * env->used_map_cnt);
-		env->prog->aux->used_map_cnt = env->used_map_cnt;
+		if (env->used_map_cnt) {
+			used_maps->arr = kmalloc_array(env->used_map_cnt,
+						       sizeof(env->used_maps[0]),
+						       GFP_KERNEL);
 
-		/* program is valid. Convert pseudo bpf_ld_imm64 into generic
-		 * bpf_ld_imm64 instructions
-		 */
-		convert_pseudo_ld_imm64(env);
+			if (!used_maps->arr) {
+				kfree(used_maps);
+				ret = -ENOMEM;
+				goto err_release_maps;
+			}
+
+			memcpy(used_maps->arr, env->used_maps,
+			       sizeof(env->used_maps[0]) * env->used_map_cnt);
+			used_maps->cnt = env->used_map_cnt;
+
+			/* program is valid. Convert pseudo bpf_ld_imm64 into generic
+			 * bpf_ld_imm64 instructions
+			 */
+			convert_pseudo_ld_imm64(env);
+		}
+
+		env->prog->aux->used_maps = used_maps;
+		mutex_init(&env->prog->aux->used_maps_mutex);
 	}
 
 	if (ret == 0)
