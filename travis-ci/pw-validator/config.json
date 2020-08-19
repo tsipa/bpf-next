@@ -10,6 +10,7 @@
             "state" : 1
           }
         ],
+        "filter_tags": ["bpf"],
         "upstream" : "https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git",
         "upstream_branch": "master",
         "pw_url" : "https://patchwork.ozlabs.org/",
@@ -26,6 +27,7 @@
             "state" : 1
           }
         ],
+        "filter_tags": ["bpf-next"],
         "upstream" : "https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf.git",
         "upstream_branch": "master",
         "pw_url" : "https://patchwork.ozlabs.org/",
@@ -34,6 +36,6 @@
         "ci_branch": "master"
       }
     },
-   "github_oauth_token" : "e79fgsdfdsgfdgssdfg"
+   "github_oauth_token" : "e7asdasdasdsadasdasd"
  }
 }

@@ -19,8 +19,8 @@ class Series(object):
         for key in data:
             setattr(self, key, data[key])
         self.subject = re.match(self._subject_regexp, data["name"]).group("name")
-        self.ignore_tags = re.compile(r"[0-9]+/[0-9]+")
-        self.tag_regexp = re.compile(r"^(\[(?P<tags>[^]]*)\])* *((?P<subj>[^: ]+):)")
+        self.ignore_tags = re.compile(r"([0-9]+/[0-9]+|[vV][0-9]+)")
+        self.tag_regexp = re.compile(r"^(\[(?P<tags>[^]]*)\])*")
 
     @property
     def relevant_series(self):
@@ -79,9 +79,6 @@ class Series(object):
             for tag in tags:
                 if not re.match(self.ignore_tags, tag):
                     r.add(tag)
-        if match.groupdict()["subj"]:
-            r.add(match.groupdict()["subj"])
-
         return r
 
     @property
@@ -101,7 +98,7 @@ class Series(object):
 
 
 class Patchwork(object):
-    def __init__(self, url, pw_search_patterns, pw_lookback=7):
+    def __init__(self, url, pw_search_patterns, pw_lookback=7, filter_tags=None):
         self.server = url
         self.logger = logging.getLogger(__name__)
 
@@ -109,6 +106,7 @@ class Patchwork(object):
         lookback = today - DT.timedelta(days=pw_lookback)
         self.since = lookback.strftime("%Y-%m-%dT%H:%M:%S")
         self.pw_search_patterns = pw_search_patterns
+        self.filter_tags = set(filter_tags)
 
     def _request(self, url):
         self.logger.debug(f"Patchwork {self.server} request: {url}")
@@ -169,11 +167,14 @@ class Patchwork(object):
         for pattern in self.pw_search_patterns:
             p = {"since": self.since, "state": 1, "archived": False}
             p.update(pattern)
-            print(p)
+            self.logger.warning(p)
             all_series = self.get_all("series", filters=p)
             for data in all_series:
                 s = Series(data, self)
                 if s.subject not in subjects:
                     # we already fetched this subject
-                    subjects[s.subject] = s.relevant_series
+                    if not s.tags & self.filter_tags:
+                        subjects[s.subject] = s.relevant_series
+                    else:
+                        self.logger.warning(f"Filtered {s.web_url} ( {s.subject} )  due to tags: %s", s.tags & self.filter_tags)
         return subjects

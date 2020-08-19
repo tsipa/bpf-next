@@ -24,6 +24,7 @@ class GithubSync(object):
         ci_branch=None,
         merge_conflict_label="merge conflict",
         pw_lookback=7,
+        filter_tags=None,
     ):
         self.ci_repo = ci_repo
         if self.ci_repo:
@@ -35,7 +36,7 @@ class GithubSync(object):
         self.master = master
         self.source_master = source_master
         self.git = Github(github_oauth_token)
-        self.pw = Patchwork(pw_url, pw_search_patterns, pw_lookback=pw_lookback)
+        self.pw = Patchwork(pw_url, pw_search_patterns, pw_lookback=pw_lookback, filter_tags=filter_tags)
         self.user = self.git.get_user()
         self.user_login = self.user.login
         self.local_repo = self.user.get_repo(self.repo_name)
