@@ -6,12 +6,68 @@ import re
 import logging
 
 
+# when we want to push this patch through CI
+RELEVANT_STATES = {
+    "new": 1,
+    "under-review": 2,
+    "rfc": 5,
+    "changes-requested": 7,
+    "awaiting-upstream": 8,
+    "deferred": 10,
+    "needs-review-ack": 11,
+}
+RELEVANT_STATE_IDS = [RELEVANT_STATES[x] for x in RELEVANT_STATES]
+# when we don't interested in this patch anymore
+IRRELEVANT_STATES = {
+    "accepted": 3,
+    "rejected": 4,
+    "not-applicable": 6,
+    "superseded": 9,
+}
+
+
+class Subject(object):
+    def __init__(self, subject, pw_client):
+        self.pw_client = pw_client
+        self.subject = subject
+        self._relevant_series = None
+
+    @property
+    def branch(self):
+        return f"series/{self.relevant_series[0].id}"
+
+    def __getattr__(self, fn):
+        return getattr(self.relevant_series[-1], fn)
+
+    @property
+    def latest_series(self):
+        return self.relevant_series[-1]
+
+    @property
+    def relevant_series(self):
+        """
+            cache and return sorted list of relevant series
+            where first element is first known version of same subject
+            and last is the most recent
+        """
+        if self._relevant_series:
+            return self._relevant_series
+        all_series = self.pw_client.get_all("series", filters={"q": self.subject})
+        relevant_series = []
+        for s in all_series:
+            item = Series(s, self.pw_client)
+            # we using full text search which could give ambigous results
+            # so we must filter out irrelevant results
+            if item.subject == self.subject:
+                relevant_series.append(item)
+        self._relevant_series = sorted(relevant_series, key=lambda k: k.version)
+        return self._relevant_series
+
+
 class Series(object):
     def __init__(self, data, pw_client):
-        """
-            Minimal required info to get explicit series is name
-        """
         self.pw_client = pw_client
+        self.data = data
         self._relevant_series = None
         self._diffs = None
         self._tags = None
@@ -23,32 +79,11 @@ class Series(object):
         self.tag_regexp = re.compile(r"^(\[(?P<tags>[^]]*)\])*")
 
     @property
-    def relevant_series(self):
-        """
-            cache and return sorted list of relevant series
-            where first element is first known version of same subject
-            and last is the most recent
-        """
-        if self._relevant_series:
-            return self._relevant_series
-        all_series = self.pw_client.get_all(
-            "series", filters={"project": self.project["id"], "q": self.subject}
-        )
-        relevant_series = []
-        for s in all_series:
-            item = Series(s, self.pw_client)
-            # we using full text search which could give ambigous results
-            # so we must filter out irrelevant results
-            if item.subject == self.subject:
-                relevant_series.append(item)
-        self._relevant_series = sorted(relevant_series, key=lambda k: k.version)
-        return self._relevant_series
-
-    @property
     def diffs(self):
         # fetching patches
         """
             Returns patches preserving original order
+            for the most recent relevant series
         """
         if self._diffs:
             return self._diffs
@@ -62,10 +97,10 @@ class Series(object):
     def closed(self):
         """
             Series considered closed if at least one patch in this series
-            have state accepted
+            is in irrelevant states
         """
         for diff in self.diffs:
-            if diff["state"] == "accepted":
+            if diff["state"] in IRRELEVANT_STATES:
                 return True
         return False
 
@@ -85,11 +120,12 @@ class Series(object):
     def tags(self):
         """
            Tags fetched from series name, diffs and cover letter
+           for most relevant series
         """
         if self._tags:
             return self._tags
         self._tags = set()
-        for diff in self.patches:
+        for diff in self.diffs:
             self._tags |= self._parse_for_tags(diff["name"])
         if self.cover_letter:
             self._tags |= self._parse_for_tags(self.cover_letter["name"])
@@ -131,7 +167,11 @@ class Patchwork(object):
         params = ""
         for key, val in filters.items():
             if val is not None:
-                params += f"{key}={val}&"
+                if isinstance(val, list):
+                    for v in val:
+                        params += f"{key}={v}&"
+                else:
+                    params += f"{key}={val}&"
 
         items = []
 
@@ -164,17 +204,27 @@ class Patchwork(object):
 
     def get_relevant_subjects(self, full=True):
         subjects = {}
+        all_subjects = {}
+        filtered_subjects = []
         for pattern in self.pw_search_patterns:
-            p = {"since": self.since, "state": 1, "archived": False}
+            p = {"since": self.since, "state": RELEVANT_STATE_IDS, "archived": False}
             p.update(pattern)
             self.logger.warning(p)
-            all_series = self.get_all("series", filters=p)
-            for data in all_series:
-                s = Series(data, self)
-                if s.subject not in subjects:
-                    # we already fetched this subject
-                    if not s.tags & self.filter_tags:
-                        subjects[s.subject] = s.relevant_series
-                    else:
-                        self.logger.warning(f"Filtered {s.web_url} ( {s.subject} )  due to tags: %s", s.tags & self.filter_tags)
-        return subjects
+            all_patches = self.get_all("patches", filters=p)
+            for patch in all_patches:
+                patch_series = patch["series"]
+                for series in patch_series:
+                    s = Series(series, self)
+                    if s.subject not in all_subjects:
+                        subjects[s.subject] = Subject(s.subject, self)
+            for subject in subjects:
+                excluded_tags = subjects[subject].tags & self.filter_tags
+                if not excluded_tags:
+                    self.logger.warning(f"Found matching relevant subject {subject}")
+                    filtered_subjects.append(subjects[subject])
+                else:
+                    self.logger.warning(
+                        f"Filtered {subjects[subject].web_url} ( {subject} )  due to tags: %s",
+                        excluded_tags,
+                    )
+        return filtered_subjects

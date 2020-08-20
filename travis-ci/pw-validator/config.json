@@ -5,9 +5,8 @@
         "pw_search_patterns" : [
           {
             "archived" : false,
-            "project" : 7,
             "q" : "bpf-next",
-            "state" : 1
+            "delegate": 77147
           }
         ],
         "filter_tags": ["bpf"],
@@ -22,9 +21,8 @@
         "pw_search_patterns" : [
           {
             "archived" : false,
-            "project" : 7,
             "q" : "bpf",
-            "state" : 1
+            "delegate": 77147
           }
         ],
         "filter_tags": ["bpf-next"],
@@ -36,6 +34,6 @@
         "ci_branch": "master"
       }
     },
-   "github_oauth_token" : "e7asdasdasdsadasdasd"
+   "github_oauth_token" : "sfdsfgfsfdgsfsgfg"
  }
 }

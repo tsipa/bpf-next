@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from patchwork import Patchwork, Series
+from patchwork import Patchwork, Series, Subject
 from github import Github
 import git
 import re
@@ -8,6 +8,7 @@ import shutil
 import os
 import logging
 import hashlib
+import copy
 
 
 class GithubSync(object):
@@ -22,10 +23,11 @@ class GithubSync(object):
         source_master,
         ci_repo=None,
         ci_branch=None,
-        merge_conflict_label="merge conflict",
+        merge_conflict_label="merge_conflict",
         pw_lookback=7,
         filter_tags=None,
     ):
+        self.downstream_branch = "downstream"
         self.ci_repo = ci_repo
         if self.ci_repo:
             self.ci_branch = ci_branch
@@ -36,10 +38,11 @@ class GithubSync(object):
         self.master = master
         self.source_master = source_master
         self.git = Github(github_oauth_token)
-        self.pw = Patchwork(pw_url, pw_search_patterns, pw_lookback=pw_lookback, filter_tags=filter_tags)
+        self.pw = Patchwork(
+            pw_url, pw_search_patterns, pw_lookback=pw_lookback, filter_tags=filter_tags
+        )
         self.user = self.git.get_user()
         self.user_login = self.user.login
-        self.local_repo = self.user.get_repo(self.repo_name)
         self.repo = self.user.get_repo(self.repo_name)
         self.branches = [x for x in self.repo.get_branches()]
         self.merge_conflict_label = merge_conflict_label
@@ -132,11 +135,15 @@ class GithubSync(object):
     def _close_pr(self, pr):
         pr.edit(state="closed")
 
+    def _sync_pr_tags(self, pr, tags):
+        pr.set_labels(*tags)
+        for tag in tags:
+            pr.add_to_labels(tag)
+
     def _comment_series_pr(
         self,
         series,
         message,
-        tags=None,
         branch_name=None,
         can_create=False,
         close=False,
@@ -146,6 +153,11 @@ class GithubSync(object):
             Appends comment to a PR.
         """
         title = f"{series.subject}"
+        pr_tags = copy.copy(series.tags)
+
+        if flag:
+            pr_tags.add(self.merge_conflict_label)
+
         if title in self.prs:
             pr = self.prs[title]
         elif can_create:
@@ -169,15 +181,15 @@ class GithubSync(object):
 
         if not flag and self._is_pr_flagged(pr):
             # remove flag and comment
-            self._unflag_pr(pr)
+            pr_tags.remove(self.merge_conflict_label)
             pr.create_issue_comment(message)
 
         if flag and not self._is_pr_flagged(pr):
             # set flag and comment
             self._flag_pr(pr)
             pr.create_issue_comment(message)
-        for tag in series.tags:
-            pr.add_to_labels(tag)
+
+        self._sync_pr_tags(pr, pr_tags)
 
         if close:
             self._close_pr(pr)
@@ -194,7 +206,6 @@ class GithubSync(object):
         if branch_name in self.local_repo.branches:
             self.local_repo.git.branch("-D", branch_name)
         self.local_repo.git.checkout("-b", branch_name)
-        # import pdb; pdb.set_trace()
         if series_to_apply.closed:
             comment = f"At least one diff in series {series_to_apply.web_url} have state 'accepted'. Closing PR."
             self._comment_series_pr(series_to_apply, comment, close=True)
@@ -217,11 +228,12 @@ class GithubSync(object):
         # TODO: omg this is damn ugly
         if self.ci_repo:
             os.system(
-                f"cp -a {self.ci_repo_dir}/* {self.ci_repo_dir}/.travis.yml {self.repodir}"
+                    f"cp -a {self.ci_repo_dir}/* {self.ci_repo_dir}/.travis.yml {self.repodir}"
             )
             self.local_repo.git.add("-A")
             self.local_repo.git.add("-f", ".travis.yml")
             self.local_repo.git.commit("-a", "-m", "adding ci files")
+
         for diff in diffs:
             f = tempfile.NamedTemporaryFile(mode="w", delete=False)
             f.write(diff["diff"])
@@ -263,8 +275,9 @@ class GithubSync(object):
             os.unlink(fname)
             if fname_commit:
                 os.unlink(fname_commit)
+                fname_commit = None
 
-        # force push only if if's a new branch or there is code diffs between old and new braches
+        # force push only if if's a new branch or there is code diffs between old and new branches
         # which could mean that we applied new set of patches or just rebased
         if (
             branch_name not in self.local_repo.remotes.origin.refs
@@ -320,13 +333,12 @@ class GithubSync(object):
         """
         self.subjects = self.pw.get_relevant_subjects()
         # fetch recent subjects
-        for subject_name in self.subjects:
-            subject = self.subjects[subject_name]
-            series_id = subject[0].id
+        for subject in self.subjects:
+            series_id = subject.id
             # branch name == sid of the first known series
-            branch_name = f"series/{series_id}"
+            branch_name = subject.branch
             # series to apply - last known series
-            series = subject[-1]
+            series = subject.latest_series
             self.checkout_and_patch(branch_name, series)
         # sync old subjects
         for subject_name in self.prs:
@@ -335,6 +347,6 @@ class GithubSync(object):
                 branch_name = self.prs[subject_name].head.label.split(":")[1]
                 series_id = branch_name.split("/")[1]
                 series = Series(self.pw.get("series", series_id), self.pw)
-                subject = series.relevant_series
-                branch_name = f"series/{series_id}"
-                self.checkout_and_patch(branch_name, subject[-1])
+                subject = Subject(series.subject, self.pw)
+                branch_name = subject.branch
+                self.checkout_and_patch(branch_name, subject.latest_series)
