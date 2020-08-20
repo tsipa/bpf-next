@@ -3872,6 +3872,38 @@ static int int_ptr_type_to_size(enum bpf_arg_type type)
 	return -EINVAL;
 }
 
+static int override_map_arg_type(struct bpf_verifier_env *env,
+				 const struct bpf_call_arg_meta *meta,
+				 enum bpf_arg_type *arg_type)
+{
+	if (!meta->map_ptr) {
+		/* kernel subsystem misconfigured verifier */
+		verbose(env, "invalid map_ptr to access map->type\n");
+		return -EACCES;
+	}
+
+	switch (meta->map_ptr->map_type) {
+	case BPF_MAP_TYPE_SOCKMAP:
+	case BPF_MAP_TYPE_SOCKHASH:
+		switch (*arg_type) {
+		case ARG_PTR_TO_MAP_VALUE:
+			*arg_type = ARG_PTR_TO_SOCKET;
+			break;
+		case ARG_PTR_TO_MAP_VALUE_OR_NULL:
+			*arg_type = ARG_PTR_TO_SOCKET_OR_NULL;
+			break;
+		default:
+			verbose(env, "invalid arg_type for sockmap/sockhash\n");
+			return -EINVAL;
+		}
+		break;
+
+	default:
+		break;
+	}
+	return 0;
+}
+
 static int check_func_arg(struct bpf_verifier_env *env, u32 arg,
 			  struct bpf_call_arg_meta *meta,
 			  const struct bpf_func_proto *fn)
@@ -3902,6 +3934,14 @@ static int check_func_arg(struct bpf_verifier_env *env, u32 arg,
 	    !may_access_direct_pkt_data(env, meta, BPF_READ)) {
 		verbose(env, "helper access to the packet is not allowed\n");
 		return -EACCES;
+	}
+
+	if (arg_type == ARG_PTR_TO_MAP_VALUE ||
+	    arg_type == ARG_PTR_TO_UNINIT_MAP_VALUE ||
+	    arg_type == ARG_PTR_TO_MAP_VALUE_OR_NULL) {
+		err = override_map_arg_type(env, meta, &arg_type);
+		if (err)
+			return err;
 	}
 
 	if (arg_type == ARG_PTR_TO_MAP_KEY ||
