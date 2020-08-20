@@ -7205,6 +7205,68 @@ static int check_cond_jmp_op(struct bpf_verifier_env *env,
 	return 0;
 }
 
+/* verify ld_imm64 insn of type PSEUDO_BTF_ID is valid */
+static inline int check_pseudo_btf_id(struct bpf_verifier_env *env,
+				      struct bpf_insn *insn)
+{
+	struct bpf_reg_state *regs = cur_regs(env);
+	u32 type, id = insn->imm;
+	u64 addr;
+	const char *sym_name;
+	const struct btf_type *t = btf_type_by_id(btf_vmlinux, id);
+
+	if (!t) {
+		verbose(env, "%s: invalid btf_id %d\n", __func__, id);
+		return -ENOENT;
+	}
+
+	if (insn[1].imm != 0) {
+		verbose(env, "%s: BPF_PSEUDO_BTF_ID uses reserved fields\n",
+			__func__);
+		return -EINVAL;
+	}
+
+	if (!btf_type_is_var(t)) {
+		verbose(env, "%s: btf_id %d isn't KIND_VAR\n", __func__, id);
+		return -EINVAL;
+	}
+
+	sym_name = btf_name_by_offset(btf_vmlinux, t->name_off);
+	addr = kallsyms_lookup_name(sym_name);
+	if (!addr) {
+		verbose(env, "%s: failed to find the address of symbol '%s'.\n",
+			__func__, sym_name);
+		return -ENOENT;
+	}
+
+	insn[0].imm = (u32)addr;
+	insn[1].imm = addr >> 32;
+	mark_reg_known_zero(env, regs, insn->dst_reg);
+
+	type = t->type;
+	t = btf_type_skip_modifiers(btf_vmlinux, type, NULL);
+	if (!btf_type_is_struct(t)) {
+		u32 tsize;
+		const struct btf_type *ret;
+		const char *tname;
+
+		/* resolve the type size of ksym. */
+		ret = btf_resolve_size(btf_vmlinux, t, &tsize, NULL, NULL);
+		if (IS_ERR(ret)) {
+			tname = btf_name_by_offset(btf_vmlinux, t->name_off);
+			verbose(env, "unable to resolve the size of type '%s': %ld\n",
+				tname, PTR_ERR(ret));
+			return -EINVAL;
+		}
+		regs[insn->dst_reg].type = PTR_TO_MEM;
+		regs[insn->dst_reg].mem_size = tsize;
+	} else {
+		regs[insn->dst_reg].type = PTR_TO_BTF_ID;
+		regs[insn->dst_reg].btf_id = type;
+	}
+	return 0;
+}
+
 /* verify BPF_LD_IMM64 instruction */
 static int check_ld_imm(struct bpf_verifier_env *env, struct bpf_insn *insn)
 {
@@ -7233,6 +7295,9 @@ static int check_ld_imm(struct bpf_verifier_env *env, struct bpf_insn *insn)
 		__mark_reg_known(&regs[insn->dst_reg], imm);
 		return 0;
 	}
+
+	if (insn->src_reg == BPF_PSEUDO_BTF_ID)
+		return check_pseudo_btf_id(env, insn);
 
 	map = env->used_maps[aux->map_index];
 	mark_reg_known_zero(env, regs, insn->dst_reg);
@@ -9253,6 +9318,9 @@ static int replace_map_fd_with_map_ptr(struct bpf_verifier_env *env)
 
 			if (insn[0].src_reg == 0)
 				/* valid generic load 64-bit imm */
+				goto next_insn;
+
+			if (insn[0].src_reg == BPF_PSEUDO_BTF_ID)
 				goto next_insn;
 
 			/* In final convert_pseudo_ld_imm64() step, this is
