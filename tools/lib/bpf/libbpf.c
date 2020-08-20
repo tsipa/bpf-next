@@ -357,7 +357,16 @@ struct extern_desc {
 			bool is_signed;
 		} kcfg;
 		struct {
-			unsigned long long addr;
+			/*
+			 *  1. If ksym is typeless, the field 'addr' is valid.
+			 *  2. If ksym is typed, the field 'vmlinux_btf_id' is
+			 *     valid.
+			 */
+			bool is_typeless;
+			union {
+				unsigned long long addr;
+				int vmlinux_btf_id;
+			};
 		} ksym;
 	};
 };
@@ -382,6 +391,7 @@ struct bpf_object {
 
 	bool loaded;
 	bool has_pseudo_calls;
+	bool has_typed_ksyms;
 
 	/*
 	 * Information when doing elf related work. Only valid if fd
@@ -2521,6 +2531,10 @@ static int bpf_object__load_vmlinux_btf(struct bpf_object *obj)
 	if (obj->btf_ext && obj->btf_ext->core_relo_info.len)
 		need_vmlinux_btf = true;
 
+	/* Support for typed ksyms needs kernel BTF */
+	if (obj->has_typed_ksyms)
+		need_vmlinux_btf = true;
+
 	bpf_object__for_each_program(prog, obj) {
 		if (!prog->load)
 			continue;
@@ -2975,10 +2989,10 @@ static int bpf_object__collect_externs(struct bpf_object *obj)
 			ext->type = EXT_KSYM;
 
 			vt = skip_mods_and_typedefs(obj->btf, t->type, NULL);
-			if (!btf_is_void(vt)) {
-				pr_warn("extern (ksym) '%s' is not typeless (void)\n", ext_name);
-				return -ENOTSUP;
-			}
+			ext->ksym.is_typeless = btf_is_void(vt);
+
+			if (!obj->has_typed_ksyms && !ext->ksym.is_typeless)
+				obj->has_typed_ksyms = true;
 		} else {
 			pr_warn("unrecognized extern section '%s'\n", sec_name);
 			return -ENOTSUP;
@@ -2992,9 +3006,9 @@ static int bpf_object__collect_externs(struct bpf_object *obj)
 	/* sort externs by type, for kcfg ones also by (align, size, name) */
 	qsort(obj->externs, obj->nr_extern, sizeof(*ext), cmp_externs);
 
-	/* for .ksyms section, we need to turn all externs into allocated
-	 * variables in BTF to pass kernel verification; we do this by
-	 * pretending that each extern is a 8-byte variable
+	/* for .ksyms section, we need to turn all typeless externs into
+	 * allocated variables in BTF to pass kernel verification; we do
+	 * this by pretending that each typeless extern is a 8-byte variable
 	 */
 	if (ksym_sec) {
 		/* find existing 4-byte integer type in BTF to use for fake
@@ -3012,7 +3026,7 @@ static int bpf_object__collect_externs(struct bpf_object *obj)
 
 		sec = ksym_sec;
 		n = btf_vlen(sec);
-		for (i = 0, off = 0; i < n; i++, off += sizeof(int)) {
+		for (i = 0, off = 0; i < n; i++) {
 			struct btf_var_secinfo *vs = btf_var_secinfos(sec) + i;
 			struct btf_type *vt;
 
@@ -3025,9 +3039,14 @@ static int bpf_object__collect_externs(struct bpf_object *obj)
 				return -ESRCH;
 			}
 			btf_var(vt)->linkage = BTF_VAR_GLOBAL_ALLOCATED;
-			vt->type = int_btf_id;
+			if (ext->ksym.is_typeless) {
+				vt->type = int_btf_id;
+				vs->size = sizeof(int);
+			}
 			vs->offset = off;
-			vs->size = sizeof(int);
+			off += vs->size;
+			pr_debug("ksym var_secinfo: var '%s', type #%d, size %d, offset %d\n",
+				 ext->name, vt->type, vs->size, vs->offset);
 		}
 		sec->size = off;
 	}
@@ -5620,8 +5639,13 @@ bpf_program__relocate(struct bpf_program *prog, struct bpf_object *obj)
 				insn[0].imm = obj->maps[obj->kconfig_map_idx].fd;
 				insn[1].imm = ext->kcfg.data_off;
 			} else /* EXT_KSYM */ {
-				insn[0].imm = (__u32)ext->ksym.addr;
-				insn[1].imm = ext->ksym.addr >> 32;
+				if (ext->ksym.is_typeless) { /* typelss ksyms */
+					insn[0].imm = (__u32)ext->ksym.addr;
+					insn[1].imm = ext->ksym.addr >> 32;
+				} else { /* typed ksyms */
+					insn[0].src_reg = BPF_PSEUDO_BTF_ID;
+					insn[0].imm = ext->ksym.vmlinux_btf_id;
+				}
 			}
 			break;
 		case RELO_CALL:
@@ -6339,6 +6363,10 @@ static int bpf_object__read_kallsyms_file(struct bpf_object *obj)
 		if (!ext || ext->type != EXT_KSYM)
 			continue;
 
+		/* Typed ksyms have the verifier to fill their addresses. */
+		if (!ext->ksym.is_typeless)
+			continue;
+
 		if (ext->is_set && ext->ksym.addr != sym_addr) {
 			pr_warn("extern (ksym) '%s' resolution is ambiguous: 0x%llx or 0x%llx\n",
 				sym_name, ext->ksym.addr, sym_addr);
@@ -6357,10 +6385,72 @@ out:
 	return err;
 }
 
+static int bpf_object__resolve_ksyms_btf_id(struct bpf_object *obj)
+{
+	struct extern_desc *ext;
+	int i, id;
+
+	if (!obj->btf_vmlinux) {
+		pr_warn("support of typed ksyms needs kernel btf.\n");
+		return -ENOENT;
+	}
+
+	for (i = 0; i < obj->nr_extern; i++) {
+		const struct btf_type *v, *vx; /* VARs in object and vmlinux btf */
+		const struct btf_type *t, *tx; /* TYPEs in btf */
+		__u32 vt, vtx; /* btf_ids of TYPEs */
+
+		ext = &obj->externs[i];
+		if (ext->type != EXT_KSYM)
+			continue;
+
+		if (ext->ksym.is_typeless)
+			continue;
+
+		if (ext->is_set) {
+			pr_warn("typed ksym '%s' resolved as typeless ksyms.\n",
+				ext->name);
+			return -EFAULT;
+		}
+
+		id = btf__find_by_name_kind(obj->btf_vmlinux, ext->name,
+					    BTF_KIND_VAR);
+		if (id <= 0) {
+			pr_warn("no btf entry for ksym '%s' in vmlinux.\n",
+				ext->name);
+			return -ESRCH;
+		}
+
+		vx = btf__type_by_id(obj->btf_vmlinux, id);
+		tx = skip_mods_and_typedefs(obj->btf_vmlinux, vx->type, &vtx);
+
+		v = btf__type_by_id(obj->btf, ext->btf_id);
+		t = skip_mods_and_typedefs(obj->btf, v->type, &vt);
+
+		if (!btf_ksym_type_match(obj->btf_vmlinux, vtx, obj->btf, vt)) {
+			const char *tname, *txname; /* names of TYPEs */
+
+			txname = btf__name_by_offset(obj->btf_vmlinux, tx->name_off);
+			tname = btf__name_by_offset(obj->btf, t->name_off);
+
+			pr_warn("ksym '%s' expects type '%s' (vmlinux_btf_id: #%d), "
+				"but got '%s' (btf_id: #%d)\n", ext->name,
+				txname, vtx, tname, vt);
+			return -EINVAL;
+		}
+
+		ext->is_set = true;
+		ext->ksym.vmlinux_btf_id = id;
+		pr_debug("extern (ksym) %s=vmlinux_btf_id(#%d)\n", ext->name, id);
+	}
+	return 0;
+}
+
 static int bpf_object__resolve_externs(struct bpf_object *obj,
 				       const char *extra_kconfig)
 {
-	bool need_config = false, need_kallsyms = false;
+	bool need_config = false;
+	bool need_kallsyms = false, need_vmlinux_btf = false;
 	struct extern_desc *ext;
 	void *kcfg_data = NULL;
 	int err, i;
@@ -6391,7 +6481,10 @@ static int bpf_object__resolve_externs(struct bpf_object *obj,
 			   strncmp(ext->name, "CONFIG_", 7) == 0) {
 			need_config = true;
 		} else if (ext->type == EXT_KSYM) {
-			need_kallsyms = true;
+			if (ext->ksym.is_typeless)
+				need_kallsyms = true;
+			else
+				need_vmlinux_btf = true;
 		} else {
 			pr_warn("unrecognized extern '%s'\n", ext->name);
 			return -EINVAL;
@@ -6417,6 +6510,11 @@ static int bpf_object__resolve_externs(struct bpf_object *obj,
 	}
 	if (need_kallsyms) {
 		err = bpf_object__read_kallsyms_file(obj);
+		if (err)
+			return -EINVAL;
+	}
+	if (need_vmlinux_btf) {
+		err = bpf_object__resolve_ksyms_btf_id(obj);
 		if (err)
 			return -EINVAL;
 	}
@@ -6452,10 +6550,10 @@ int bpf_object__load_xattr(struct bpf_object_load_attr *attr)
 	}
 
 	err = bpf_object__probe_loading(obj);
+	err = err ? : bpf_object__load_vmlinux_btf(obj);
 	err = err ? : bpf_object__resolve_externs(obj, obj->kconfig);
 	err = err ? : bpf_object__sanitize_and_load_btf(obj);
 	err = err ? : bpf_object__sanitize_maps(obj);
-	err = err ? : bpf_object__load_vmlinux_btf(obj);
 	err = err ? : bpf_object__init_kern_struct_ops_maps(obj);
 	err = err ? : bpf_object__create_maps(obj);
 	err = err ? : bpf_object__relocate(obj, attr->target_btf_path);
