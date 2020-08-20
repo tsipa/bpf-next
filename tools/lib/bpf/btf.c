@@ -1005,6 +1005,177 @@ int btf__get_map_kv_tids(const struct btf *btf, const char *map_name,
 	return 0;
 }
 
+/*
+ * Basic type check for ksym support. Only checks type kind and resolved size.
+ */
+static inline
+bool btf_ksym_equal_type(const struct btf *ba, __u32 type_a,
+			 const struct btf *bb, __u32 type_b)
+{
+	const struct btf_type *ta, *tb;
+
+	ta = btf__type_by_id(ba, type_a);
+	tb = btf__type_by_id(bb, type_b);
+
+	/* compare type kind */
+	if (btf_kind(ta) != btf_kind(tb))
+		return false;
+
+	/* compare resolved type size */
+	return btf__resolve_size(ba, type_a) == btf__resolve_size(bb, type_b);
+}
+
+/*
+ * Match a ksym's type defined in bpf programs against its type encoded in
+ * kernel btf.
+ */
+bool btf_ksym_type_match(const struct btf *ba, __u32 id_a,
+			 const struct btf *bb, __u32 id_b)
+{
+	const struct btf_type *ta = btf__type_by_id(ba, id_a);
+	const struct btf_type *tb = btf__type_by_id(bb, id_b);
+	int i;
+
+	/* compare type kind */
+	if (btf_kind(ta) != btf_kind(tb)) {
+		pr_warn("%s:mismatched type kind (%d v.s. %d).\n",
+			__func__, btf_kind(ta), btf_kind(tb));
+		return false;
+	}
+
+	switch (btf_kind(ta)) {
+	case BTF_KIND_INT: { /* compare size and encoding */
+		__u32 ea, eb;
+
+		if (ta->size != tb->size) {
+			pr_warn("%s:INT size mismatch, (%u v.s. %u)\n",
+				__func__, ta->size, tb->size);
+			return false;
+		}
+		ea = *(__u32 *)(ta + 1);
+		eb = *(__u32 *)(tb + 1);
+		if (ea != eb) {
+			pr_warn("%s:INT encoding mismatch (%u v.s. %u)\n",
+				__func__, ea, eb);
+			return false;
+		}
+		break;
+	}
+	case BTF_KIND_ARRAY: { /* compare type and number of elements */
+		const struct btf_array *ea, *eb;
+
+		ea = btf_array(ta);
+		eb = btf_array(tb);
+		if (!btf_ksym_equal_type(ba, ea->type, bb, eb->type)) {
+			pr_warn("%s:ARRAY elem type mismatch.\n", __func__);
+			return false;
+		}
+		if (ea->nelems != eb->nelems) {
+			pr_warn("%s:ARRAY nelems mismatch (%d v.s. %d)\n",
+				__func__, ea->nelems, eb->nelems);
+			return false;
+		}
+		break;
+	}
+	case BTF_KIND_STRUCT:
+	case BTF_KIND_UNION: { /* compare size, vlen and member offset, name */
+		const struct btf_member *ma, *mb;
+
+		if (ta->size != tb->size) {
+			pr_warn("%s:STRUCT size mismatch, (%u v.s. %u)\n",
+				__func__, ta->size, tb->size);
+			return false;
+		}
+		if (btf_vlen(ta) != btf_vlen(tb)) {
+			pr_warn("%s:STRUCT vlen mismatch, (%u v.s. %u)\n",
+				__func__, btf_vlen(ta), btf_vlen(tb));
+			return false;
+		}
+
+		ma = btf_members(ta);
+		mb = btf_members(tb);
+		for (i = 0; i < btf_vlen(ta); i++, ma++, mb++) {
+			const char *na, *nb;
+
+			if (ma->offset != mb->offset) {
+				pr_warn("%s:STRUCT field offset mismatch, (%u v.s. %u)\n",
+					__func__, ma->offset, mb->offset);
+				return false;
+			}
+			na = btf__name_by_offset(ba, ma->name_off);
+			nb = btf__name_by_offset(bb, mb->name_off);
+			if (strcmp(na, nb)) {
+				pr_warn("%s:STRUCT field name mismatch, (%s v.s. %s)\n",
+					__func__, na, nb);
+				return false;
+			}
+		}
+		break;
+	}
+	case BTF_KIND_ENUM: { /* compare vlen and member value, name */
+		const struct btf_enum *ma, *mb;
+
+		if (btf_vlen(ta) != btf_vlen(tb)) {
+			pr_warn("%s:ENUM vlen mismatch, (%u v.s. %u)\n",
+				__func__, btf_vlen(ta), btf_vlen(tb));
+			return false;
+		}
+
+		ma = btf_enum(ta);
+		mb = btf_enum(tb);
+		for (i = 0; i < btf_vlen(ta); i++, ma++, mb++) {
+			if (ma->val != mb->val) {
+				pr_warn("%s:ENUM val mismatch, (%u v.s. %u)\n",
+					__func__, ma->val, mb->val);
+				return false;
+			}
+		}
+		break;
+	}
+	case BTF_KIND_PTR: { /* naive compare of ref type for PTR */
+		if (!btf_ksym_equal_type(ba, ta->type, bb, tb->type)) {
+			pr_warn("%s:PTR ref type mismatch.\n", __func__);
+			return false;
+		}
+		break;
+	}
+	case BTF_KIND_FUNC_PROTO: { /* naive compare of vlen and param types */
+		const struct btf_param *pa, *pb;
+
+		if (btf_vlen(ta) != btf_vlen(tb)) {
+			pr_warn("%s:FUNC_PROTO vlen mismatch, (%u v.s. %u)\n",
+				__func__, btf_vlen(ta), btf_vlen(tb));
+			return false;
+		}
+
+		pa = btf_params(ta);
+		pb = btf_params(tb);
+		for (i = 0; i < btf_vlen(ta); i++, pa++, pb++) {
+			if (!btf_ksym_equal_type(ba, pa->type, bb, pb->type)) {
+				pr_warn("%s:FUNC_PROTO params type mismatch.\n",
+					__func__);
+				return false;
+			}
+		}
+		break;
+	}
+	case BTF_KIND_FUNC:
+	case BTF_KIND_CONST:
+	case BTF_KIND_VOLATILE:
+	case BTF_KIND_RESTRICT:
+	case BTF_KIND_TYPEDEF:
+	case BTF_KIND_VAR:
+	case BTF_KIND_DATASEC:
+		pr_warn("unexpected type for matching ksym types.\n");
+		return false;
+	default:
+		pr_warn("unsupported btf types.\n");
+		return false;
+	}
+
+	return true;
+}
+
 struct btf_ext_sec_setup_param {
 	__u32 off;
 	__u32 len;
