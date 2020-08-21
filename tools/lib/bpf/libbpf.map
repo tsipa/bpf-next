@@ -299,3 +299,8 @@ LIBBPF_0.1.0 {
 		btf__set_fd;
 		btf__set_pointer_size;
 } LIBBPF_0.0.9;
+
+LIBBPF_0.2.0 {
+	global:
+		bpf_program__section_name;
+} LIBBPF_0.1.0;
