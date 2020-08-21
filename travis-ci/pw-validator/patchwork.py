@@ -127,9 +127,12 @@ class Series(object):
         self._tags = set()
         for diff in self.diffs:
             self._tags |= self._parse_for_tags(diff["name"])
+            self._tags.add(diff["state"])
         if self.cover_letter:
             self._tags |= self._parse_for_tags(self.cover_letter["name"])
         self._tags |= self._parse_for_tags(self.name)
+        self._tags.add(f"V{self.version}")
+
         return self._tags
 
 

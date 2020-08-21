@@ -1,39 +1,31 @@
 {
-  "git@github.com:tsipa/bpf-next" : {
-    "branches" : {
-      "bpf-next" : {
-        "pw_search_patterns" : [
-          {
-            "archived" : false,
-            "q" : "bpf-next",
-            "delegate": 77147
-          }
-        ],
-        "filter_tags": ["bpf"],
-        "upstream" : "https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git",
-        "upstream_branch": "master",
-        "pw_url" : "https://patchwork.ozlabs.org/",
-        "pw_lookback" : 7,
-        "ci_repo": "git@github.com:tsipa/bpf-tests",
-        "ci_branch": "master"
-      },
-      "bpf" : {
-        "pw_search_patterns" : [
-          {
-            "archived" : false,
-            "q" : "bpf",
-            "delegate": 77147
-          }
-        ],
-        "filter_tags": ["bpf-next"],
-        "upstream" : "https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf.git",
-        "upstream_branch": "master",
-        "pw_url" : "https://patchwork.ozlabs.org/",
-        "pw_lookback" : 7,
-        "ci_repo": "git@github.com:tsipa/bpf-tests",
-        "ci_branch": "master"
-      }
-    },
-   "github_oauth_token" : "sfdsfgfsfdgsfsgfg"
- }
+    "git@github.com:tsipa/bpf-next": {
+        "branches": {
+            "bpf-next": {
+                "pw_search_patterns": [
+                    {"archived": false, "q": "bpf-next", "delegate": 77147}
+                ],
+                "filter_tags": ["bpf"],
+                "upstream": "https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git",
+                "upstream_branch": "master",
+                "pw_url": "https://patchwork.ozlabs.org/",
+                "pw_lookback": 7,
+                "ci_repo": "git@github.com:tsipa/bpf-tests",
+                "ci_branch": "master"
+            },
+            "bpf": {
+                "pw_search_patterns": [
+                    {"archived": false, "q": "bpf", "delegate": 77147}
+                ],
+                "filter_tags": ["bpf-next"],
+                "upstream": "https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf.git",
+                "upstream_branch": "master",
+                "pw_url": "https://patchwork.ozlabs.org/",
+                "pw_lookback": 7,
+                "ci_repo": "git@github.com:tsipa/bpf-tests",
+                "ci_branch": "master"
+            }
+        },
+        "github_oauth_token": "e79f156f319eec617b85a6cccb7978a7dc0bc293"
+    }
 }

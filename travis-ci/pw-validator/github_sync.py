@@ -23,7 +23,7 @@ class GithubSync(object):
         source_master,
         ci_repo=None,
         ci_branch=None,
-        merge_conflict_label="merge_conflict",
+        merge_conflict_label="merge-conflict",
         pw_lookback=7,
         filter_tags=None,
     ):
@@ -89,14 +89,14 @@ class GithubSync(object):
         """
         if os.path.exists(f"{self.repodir}/.git"):
             self.local_repo = git.Repo.init(self.repodir)
-            self.local_repo.git.fetch("-p", self.repo_url)
+            self.local_repo.git.fetch("-p", "origin")
         else:
             shutil.rmtree(self.repodir, ignore_errors=True)
             self.local_repo = git.Repo.clone_from(self.repo_url, self.repodir)
         if self.ci_repo:
             if os.path.exists(f"{self.ci_repo_dir}/.git"):
                 self.ci_local_repo = git.Repo.init(self.ci_repo_dir)
-                self.ci_local_repo.git.fetch("-p", self.ci_repo)
+                self.ci_local_repo.git.fetch("-p", "origin")
             else:
                 shutil.rmtree(self.ci_repo_dir, ignore_errors=True)
                 self.ci_local_repo = git.Repo.clone_from(self.ci_repo, self.ci_repo_dir)
@@ -116,12 +116,6 @@ class GithubSync(object):
         self.local_repo.git.checkout("-b", branch_name)
         self.local_repo.git.commit("--allow-empty", "-m", "Dummy commit")
         self.local_repo.git.push("-f", "origin", branch_name)
-
-    def _flag_pr(self, pr):
-        """
-            PRs with merge conflicts should not receive spam about merge conflicts
-        """
-        pr.add_to_labels(self.merge_conflict_label)
 
     def _unflag_pr(self, pr):
         pr.remove_from_labels(self.merge_conflict_label)
@@ -143,7 +137,7 @@ class GithubSync(object):
     def _comment_series_pr(
         self,
         series,
-        message,
+        message=None,
         branch_name=None,
         can_create=False,
         close=False,
@@ -179,19 +173,14 @@ class GithubSync(object):
             # If PR already closed do nothing
             return pr
 
-        if not flag and self._is_pr_flagged(pr):
-            # remove flag and comment
-            pr_tags.remove(self.merge_conflict_label)
-            pr.create_issue_comment(message)
-
-        if flag and not self._is_pr_flagged(pr):
-            # set flag and comment
-            self._flag_pr(pr)
-            pr.create_issue_comment(message)
+        if (not flag) or (flag and not self._is_pr_flagged(pr)):
+            if message:
+                pr.create_issue_comment(message)
 
         self._sync_pr_tags(pr, pr_tags)
 
         if close:
+            self.logger.warning(f"Closing PR {pr}")
             self._close_pr(pr)
         return pr
 
@@ -207,14 +196,15 @@ class GithubSync(object):
             self.local_repo.git.branch("-D", branch_name)
         self.local_repo.git.checkout("-b", branch_name)
         if series_to_apply.closed:
-            comment = f"At least one diff in series {series_to_apply.web_url} have state 'accepted'. Closing PR."
-            self._comment_series_pr(series_to_apply, comment, close=True)
+            comment = f"At least one diff in series {series_to_apply.web_url} irrelevant now. Closing PR."
+            self._comment_series_pr(series_to_apply, message=comment, close=True)
             # delete branch if there is no more PRs left from this branch
             if (
                 branch_name in self.all_prs
                 and len(self.all_prs[branch_name]) == 1
                 and branch_name in self.branches
             ):
+                self.logger.warning(f"Removing branch {branch_name}")
                 self.repo.get_git_ref(f"heads/{branch_name}").delete()
             return False
         diffs = series_to_apply.diffs
@@ -228,7 +218,7 @@ class GithubSync(object):
         # TODO: omg this is damn ugly
         if self.ci_repo:
             os.system(
-                    f"cp -a {self.ci_repo_dir}/* {self.ci_repo_dir}/.travis.yml {self.repodir}"
+                f"cp -a {self.ci_repo_dir}/* {self.ci_repo_dir}/.travis.yml {self.repodir}"
             )
             self.local_repo.git.add("-A")
             self.local_repo.git.add("-f", ".travis.yml")
@@ -262,7 +252,7 @@ class GithubSync(object):
 
                 self._comment_series_pr(
                     series_to_apply,
-                    comment,
+                    message=comment,
                     can_create=True,
                     branch_name=branch_name,
                     flag=True,
@@ -285,8 +275,14 @@ class GithubSync(object):
         ):
             self.local_repo.git.push("-f", "origin", branch_name)
             self._comment_series_pr(
-                series_to_apply, comment, can_create=True, branch_name=branch_name
+                series_to_apply,
+                message=comment,
+                can_create=True,
+                branch_name=branch_name,
             )
+        else:
+            # no code changes, just update tags
+            self._comment_series_pr(series_to_apply)
         return True
 
     def get_pulls(self):
