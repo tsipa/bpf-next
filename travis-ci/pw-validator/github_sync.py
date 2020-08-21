@@ -195,8 +195,12 @@ class GithubSync(object):
         if branch_name in self.local_repo.branches:
             self.local_repo.git.branch("-D", branch_name)
         self.local_repo.git.checkout("-b", branch_name)
-        if series_to_apply.closed:
-            comment = f"At least one diff in series {series_to_apply.web_url} irrelevant now. Closing PR."
+        if series_to_apply.closed or series_to_apply.expired:
+            if series_to_apply.closed:
+                comment = f"At least one diff in series {series_to_apply.web_url} irrelevant now. Closing PR."
+            else:
+                comment = f"At least one diff in series {series_to_apply.web_url} expired. Closing PR."
+                self.logger.warning(comment)
             self._comment_series_pr(series_to_apply, message=comment, close=True)
             # delete branch if there is no more PRs left from this branch
             if (

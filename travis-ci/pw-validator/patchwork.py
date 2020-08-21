@@ -4,7 +4,8 @@ import requests
 import datetime as DT
 import re
 import logging
-
+import datetime
+import time
 
 # when we want to push this patch through CI
 RELEVANT_STATES = {
@@ -17,6 +18,12 @@ RELEVANT_STATES = {
     "needs-review-ack": 11,
 }
 RELEVANT_STATE_IDS = [RELEVANT_STATES[x] for x in RELEVANT_STATES]
+# with these tags will be closed if no updates within TTL
+TTL = {
+    "changes-requested": 86400,
+    "rfc": 86400
+}
+
 # when we don't interested in this patch anymore
 IRRELEVANT_STATES = {
     "accepted": 3,
@@ -135,6 +142,24 @@ class Series(object):
 
         return self._tags
 
+    @property
+    def expirable(self):
+        for diff in self.diffs:
+            if diff["state"] in TTL:
+                return True
+        return False
+
+    @property
+    def expired(self):
+        now = datetime.datetime.now()
+
+        for diff in self.diffs:
+            if diff["state"] in TTL:
+                d_date = datetime.datetime.strptime(diff["date"], "%Y-%m-%dT%H:%M:%S")
+                if (now - d_date).seconds >= TTL[diff["state"]]:
+                    return True
+        return False
+
 
 class Patchwork(object):
     def __init__(self, url, pw_search_patterns, pw_lookback=7, filter_tags=None):
@@ -222,9 +247,13 @@ class Patchwork(object):
                         subjects[s.subject] = Subject(s.subject, self)
             for subject in subjects:
                 excluded_tags = subjects[subject].tags & self.filter_tags
-                if not excluded_tags:
+                if not excluded_tags and not subjects[subject].expired:
                     self.logger.warning(f"Found matching relevant subject {subject}")
                     filtered_subjects.append(subjects[subject])
+                elif subjects[subject].expired:
+                    self.logger.warning(
+                        f"Filtered {subjects[subject].web_url} ( {subject} ) as expired",
+                    )
                 else:
                     self.logger.warning(
                         f"Filtered {subjects[subject].web_url} ( {subject} )  due to tags: %s",
