@@ -11,14 +11,12 @@
 
 int main(int ac, char **argv)
 {
-	struct rlimit r = {RLIM_INFINITY, RLIM_INFINITY};
 	long key, next_key, value;
 	char filename[256];
 	struct ksym *sym;
 	int i;
 
 	snprintf(filename, sizeof(filename), "%s_kern.o", argv[0]);
-	setrlimit(RLIMIT_MEMLOCK, &r);
 
 	if (load_kallsyms()) {
 		printf("failed to process /proc/kallsyms\n");
