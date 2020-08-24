@@ -26,17 +26,12 @@ __u32 g_line = 0;
 		return 0;	\
 })
 
-struct bpf_map_memory {
-	__u32 pages;
-} __attribute__((preserve_access_index));
-
 struct bpf_map {
 	enum bpf_map_type map_type;
 	__u32 key_size;
 	__u32 value_size;
 	__u32 max_entries;
 	__u32 id;
-	struct bpf_map_memory memory;
 } __attribute__((preserve_access_index));
 
 static inline int check_bpf_map_fields(struct bpf_map *map, __u32 key_size,
