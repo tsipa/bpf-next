@@ -71,6 +71,10 @@ void test_ksyms_btf(void)
 	      "got %llu, exp %llu\n", data->out__runqueues, runqueues_addr);
 	CHECK(data->out__bpf_prog_active != bpf_prog_active_addr, "bpf_prog_active",
 	      "got %llu, exp %llu\n", data->out__bpf_prog_active, bpf_prog_active_addr);
+	CHECK(data->out__rq_cpu != 1, "rq_cpu",
+	      "got %u, exp %u\n", data->out__rq_cpu, 1);
+	CHECK(data->out__process_counts == -1, "process_counts",
+	      "got %lu, exp != -1", data->out__process_counts);
 
 cleanup:
 	test_ksyms_btf__destroy(skel);
