@@ -52,6 +52,8 @@ LIBBPF_API int btf__get_map_kv_tids(const struct btf *btf, const char *map_name,
 				    __u32 expected_key_size,
 				    __u32 expected_value_size,
 				    __u32 *key_type_id, __u32 *value_type_id);
+LIBBPF_API bool btf_ksym_type_match(const struct btf *ba, __u32 id_a,
+				    const struct btf *bb, __u32 id_b);
 
 LIBBPF_API struct btf_ext *btf_ext__new(__u8 *data, __u32 size);
 LIBBPF_API void btf_ext__free(struct btf_ext *btf_ext);
