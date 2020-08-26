@@ -69,6 +69,17 @@ extern void libbpf_print(enum libbpf_print_level level,
 			 const char *format, ...)
 	__attribute__((format(printf, 2, 3)));
 
+/* These types are for casting 64-bit arguments of printf-like functions to
+ * avoid compiler warnings on various architectures that define size_t, __u64,
+ * uint64_t, etc as either unsigned long or unsigned long long (similarly for
+ * signed variants). Use these typedefs only for these purposes. Alternative
+ * is PRIu64 (and similar) macros, requiring stitching printf format strings
+ * which are extremely ugly and should be avoided in libbpf code base. With
+ * arguments casted to __pu64/__ps64, always use %llu/%lld in format string.
+ */
+typedef unsigned long long __pu64;
+typedef long long __ps64;
+
 #define __pr(level, fmt, ...)	\
 do {				\
 	libbpf_print(level, "libbpf: " fmt, ##__VA_ARGS__);	\

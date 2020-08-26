@@ -1529,12 +1529,12 @@ static int set_kcfg_value_num(struct extern_desc *ext, void *ext_val,
 {
 	if (ext->kcfg.type != KCFG_INT && ext->kcfg.type != KCFG_CHAR) {
 		pr_warn("extern (kcfg) %s=%llu should be integer\n",
-			ext->name, (unsigned long long)value);
+			ext->name, (__pu64)value);
 		return -EINVAL;
 	}
 	if (!is_kcfg_value_in_range(ext, value)) {
 		pr_warn("extern (kcfg) %s=%llu value doesn't fit in %d bytes\n",
-			ext->name, (unsigned long long)value, ext->kcfg.sz);
+			ext->name, (__pu64)value, ext->kcfg.sz);
 		return -ERANGE;
 	}
 	switch (ext->kcfg.sz) {
@@ -2823,7 +2823,8 @@ static int bpf_object__elf_collect(struct bpf_object *obj)
 			obj->efile.bss = data;
 			obj->efile.bss_shndx = idx;
 		} else {
-			pr_info("elf: skipping section(%d) %s (size %zu)\n", idx, name, sh.sh_size);
+			pr_info("elf: skipping section(%d) %s (size %zu)\n", idx, name,
+				(size_t)sh.sh_size);
 		}
 	}
 
@@ -5244,7 +5245,7 @@ static int bpf_core_patch_insn(struct bpf_program *prog,
 		if (res->validate && imm != orig_val) {
 			pr_warn("prog '%s': relo #%d: unexpected insn #%d (LDIMM64) value: got %llu, exp %u -> %u\n",
 				bpf_program__title(prog, false), relo_idx,
-				insn_idx, imm, orig_val, new_val);
+				insn_idx, (__pu64)imm, orig_val, new_val);
 			return -EINVAL;
 		}
 
@@ -5252,7 +5253,7 @@ static int bpf_core_patch_insn(struct bpf_program *prog,
 		insn[1].imm = 0; /* currently only 32-bit values are supported */
 		pr_debug("prog '%s': relo #%d: patched insn #%d (LDIMM64) imm64 %llu -> %u\n",
 			 bpf_program__title(prog, false), relo_idx, insn_idx,
-			 imm, new_val);
+			 (__pu64)imm, new_val);
 		break;
 	}
 	default:
@@ -7782,8 +7783,8 @@ static int bpf_object__collect_st_ops_relos(struct bpf_object *obj,
 		st_ops = map->st_ops;
 		pr_debug("struct_ops reloc %s: for %lld value %lld shdr_idx %u rel.r_offset %zu map->sec_offset %zu name %d (\'%s\')\n",
 			 map->name,
-			 (long long)(rel.r_info >> 32),
-			 (long long)sym.st_value,
+			 (__ps64)(rel.r_info >> 32),
+			 (__ps64)sym.st_value,
 			 shdr_idx, (size_t)rel.r_offset,
 			 map->sec_offset, sym.st_name, name);
 
