@@ -3509,6 +3509,18 @@ union bpf_attr {
  *
  *		**-EPERM** This helper cannot be used under the
  *			   current sock_ops->op.
+ *
+ * long bpf_get_current_pcomm(void *buf, u32 size_of_buf)
+ *	Description
+ *		Copy the **comm** attribute of the real_parent current task
+ *		into *buf* of *size_of_buf*. The **comm** attribute contains
+ *		the name of the executable (excluding the path) for real_parent
+ *		of current task.
+ *		The *size_of_buf* must be strictly positive. On success, the
+ *		helper makes sure that the *buf* is NUL-terminated. On failure,
+ *		it is filled with zeroes.
+ *	Return
+ *		0 on success, or a negative error in case of failure.
  */
 #define __BPF_FUNC_MAPPER(FN)		\
 	FN(unspec),			\
@@ -3655,7 +3667,8 @@ union bpf_attr {
 	FN(get_task_stack),		\
 	FN(load_hdr_opt),		\
 	FN(store_hdr_opt),		\
-	FN(reserve_hdr_opt),
+	FN(reserve_hdr_opt),		\
+	FN(get_current_pcomm),		\
 	/* */
 
 /* integer value in 'imm' field of BPF_CALL instruction selects which helper

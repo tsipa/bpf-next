@@ -575,6 +575,34 @@ const struct bpf_func_proto bpf_get_ns_current_pid_tgid_proto = {
 	.arg4_type      = ARG_CONST_SIZE,
 };
 
+BPF_CALL_2(bpf_get_current_pcomm, char *, buf, u32, size)
+{
+	struct task_struct *task = current;
+
+	if (unlikely(!task))
+		goto err_clear;
+
+	strncpy(buf, task->real_parent->comm, size);
+
+	/* Verifier guarantees that size > 0. For task->comm exceeding
+	 * size, guarantee that buf is %NUL-terminated. Unconditionally
+	 * done here to save the size test.
+	 */
+	buf[size - 1] = 0;
+	return 0;
+err_clear:
+	memset(buf, 0, size);
+	return -EINVAL;
+}
+
+const struct bpf_func_proto bpf_get_current_pcomm_proto = {
+	.func		= bpf_get_current_pcomm,
+	.gpl_only	= false,
+	.ret_type	= RET_INTEGER,
+	.arg1_type	= ARG_PTR_TO_UNINIT_MEM,
+	.arg2_type	= ARG_CONST_SIZE,
+};
+
 static const struct bpf_func_proto bpf_get_raw_smp_processor_id_proto = {
 	.func		= bpf_get_raw_cpu_id,
 	.gpl_only	= false,
