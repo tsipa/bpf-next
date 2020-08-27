@@ -83,6 +83,12 @@ static bool is_iter_map_target(const char *target_name)
 	       strcmp(target_name, "bpf_sk_storage_map") == 0;
 }
 
+static bool is_iter_task_target(const char *target_name)
+{
+	return strcmp(target_name, "task") == 0 ||
+	       strcmp(target_name, "task_file") == 0;
+}
+
 static void show_iter_json(struct bpf_link_info *info, json_writer_t *wtr)
 {
 	const char *target_name = u64_to_ptr(info->iter.target_name);
@@ -91,6 +97,9 @@ static void show_iter_json(struct bpf_link_info *info, json_writer_t *wtr)
 
 	if (is_iter_map_target(target_name))
 		jsonw_uint_field(wtr, "map_id", info->iter.map.map_id);
+	else if (is_iter_task_target(target_name))
+		jsonw_uint_field(wtr, "main_thread_only",
+				 info->iter.task.main_thread_only);
 }
 
 static int get_prog_info(int prog_id, struct bpf_prog_info *info)
@@ -202,6 +211,9 @@ static void show_iter_plain(struct bpf_link_info *info)
 
 	if (is_iter_map_target(target_name))
 		printf("map_id %u  ", info->iter.map.map_id);
+	else if (is_iter_task_target(target_name))
+		printf("main_thread_only %u  ",
+		       info->iter.task.main_thread_only);
 }
 
 static int show_link_close_plain(int fd, struct bpf_link_info *info)

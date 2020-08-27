@@ -17,15 +17,16 @@ SYNOPSIS
 ITER COMMANDS
 ===================
 
-|	**bpftool** **iter pin** *OBJ* *PATH* [**map** *MAP*]
+|	**bpftool** **iter pin** *OBJ* *PATH* [**map** *MAP* | **task** *TASK_OPT*]
 |	**bpftool** **iter help**
 |
 |	*OBJ* := /a/file/of/bpf_iter_target.o
 |	*MAP* := { **id** *MAP_ID* | **pinned** *FILE* }
+|	*TASK_OPT* := { **main_thread_only** }
 
 DESCRIPTION
 ===========
-	**bpftool iter pin** *OBJ* *PATH* [**map** *MAP*]
+	**bpftool iter pin** *OBJ* *PATH* [**map** *MAP* | **task** *TASK_OPT*]
 		  A bpf iterator combines a kernel iterating of
 		  particular kernel data (e.g., tasks, bpf_maps, etc.)
 		  and a bpf program called for each kernel data object
@@ -43,6 +44,11 @@ DESCRIPTION
 		  that map. User can have a bpf program in kernel to run
 		  with each map element, do checking, filtering, aggregation,
 		  etc. without copying data to user space.
+
+		  The task or task_file bpf iterator can have an optional
+		  parameter *TASK_OPT*. The current supported value is
+		  **main_thread_only** which supports to iterate only main
+		  threads of each process.
 
 		  User can then *cat PATH* to see the bpf iterator output.
 
@@ -77,6 +83,13 @@ EXAMPLES
 
    Create a file-based bpf iterator from bpf_iter_hashmap.o and map with
    id 20, and pin it to /sys/fs/bpf/my_hashmap
+
+**# bpftool iter pin bpf_iter_task.o /sys/fs/bpf/my_task task main_thread_only**
+
+::
+
+   Create a file-based bpf iterator from bpf_iter_task.o which iterates main
+   threads of processes only, and pin it to /sys/fs/bpf/my_hashmap
 
 SEE ALSO
 ========

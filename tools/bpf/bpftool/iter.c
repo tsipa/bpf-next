@@ -26,6 +26,7 @@ static int do_pin(int argc, char **argv)
 
 	/* optional arguments */
 	if (argc) {
+		memset(&linfo, 0, sizeof(linfo));
 		if (is_prefix(*argv, "map")) {
 			NEXT_ARG();
 
@@ -38,11 +39,29 @@ static int do_pin(int argc, char **argv)
 			if (map_fd < 0)
 				return -1;
 
-			memset(&linfo, 0, sizeof(linfo));
 			linfo.map.map_fd = map_fd;
-			iter_opts.link_info = &linfo;
-			iter_opts.link_info_len = sizeof(linfo);
+		} else if (is_prefix(*argv, "task")) {
+			NEXT_ARG();
+
+			if (!REQ_ARGS(1)) {
+				p_err("incorrect task spec");
+				return -1;
+			}
+
+			if (strcmp(*argv, "main_thread_only") != 0) {
+				p_err("incorrect task spec");
+				return -1;
+			}
+
+			linfo.task.main_thread_only = true;
+		} else {
+			p_err("expected no more arguments, 'map' or 'task', got: '%s'?",
+			      *argv);
+			return -1;
 		}
+
+		iter_opts.link_info = &linfo;
+		iter_opts.link_info_len = sizeof(linfo);
 	}
 
 	obj = bpf_object__open(objfile);
@@ -95,9 +114,10 @@ close_map_fd:
 static int do_help(int argc, char **argv)
 {
 	fprintf(stderr,
-		"Usage: %1$s %2$s pin OBJ PATH [map MAP]\n"
+		"Usage: %1$s %2$s pin OBJ PATH [map MAP | task TASK_OPT]\n"
 		"       %1$s %2$s help\n"
 		"       " HELP_SPEC_MAP "\n"
+		"       TASK_OPT := { main_thread_only }\n"
 		"",
 		bin_name, "iter");
 

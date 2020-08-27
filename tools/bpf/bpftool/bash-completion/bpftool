@@ -613,6 +613,7 @@ _bpftool()
             esac
             ;;
         iter)
+            local TARGET_TYPE='map task'
             case $command in
                 pin)
                     case $prev in
@@ -628,8 +629,14 @@ _bpftool()
                         pinned)
                             _filedir
                             ;;
-                        *)
+                        task)
+                            _bpftool_one_of_list 'main_thread_only'
+                            ;;
+                        map)
                             _bpftool_one_of_list $MAP_TYPE
+                            ;;
+                        *)
+                            _bpftool_one_of_list $TARGET_TYPE
                             ;;
                     esac
                     return 0
