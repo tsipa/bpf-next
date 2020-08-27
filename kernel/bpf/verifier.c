@@ -411,7 +411,8 @@ static bool reg_type_may_be_null(enum bpf_reg_type type)
 	       type == PTR_TO_BTF_ID_OR_NULL ||
 	       type == PTR_TO_MEM_OR_NULL ||
 	       type == PTR_TO_RDONLY_BUF_OR_NULL ||
-	       type == PTR_TO_RDWR_BUF_OR_NULL;
+	       type == PTR_TO_RDWR_BUF_OR_NULL ||
+	       type == CONST_PTR_TO_MAP_OR_NULL;
 }
 
 static bool reg_may_point_to_spin_lock(const struct bpf_reg_state *reg)
@@ -427,7 +428,8 @@ static bool reg_type_may_be_refcounted_or_null(enum bpf_reg_type type)
 		type == PTR_TO_TCP_SOCK ||
 		type == PTR_TO_TCP_SOCK_OR_NULL ||
 		type == PTR_TO_MEM ||
-		type == PTR_TO_MEM_OR_NULL;
+		type == PTR_TO_MEM_OR_NULL ||
+		type == CONST_PTR_TO_MAP_OR_NULL;
 }
 
 static bool arg_type_may_be_refcounted(enum bpf_arg_type type)
@@ -509,6 +511,7 @@ static const char * const reg_type_str[] = {
 	[PTR_TO_RDONLY_BUF_OR_NULL] = "rdonly_buf_or_null",
 	[PTR_TO_RDWR_BUF]	= "rdwr_buf",
 	[PTR_TO_RDWR_BUF_OR_NULL] = "rdwr_buf_or_null",
+	[CONST_PTR_TO_MAP_OR_NULL] = "map_ptr_or_null",
 };
 
 static char slot_type_char[] = {
@@ -3965,9 +3968,13 @@ static int check_func_arg(struct bpf_verifier_env *env, u32 arg,
 		expected_type = SCALAR_VALUE;
 		if (type != expected_type)
 			goto err_type;
-	} else if (arg_type == ARG_CONST_MAP_PTR) {
+	} else if (arg_type == ARG_CONST_MAP_PTR ||
+		   arg_type == ARG_CONST_MAP_PTR_OR_NULL) {
 		expected_type = CONST_PTR_TO_MAP;
-		if (type != expected_type)
+		if (register_is_null(reg) &&
+		    arg_type == ARG_CONST_MAP_PTR_OR_NULL)
+			/* final test in check_stack_boundary() */;
+		else if (type != expected_type)
 			goto err_type;
 	} else if (arg_type == ARG_PTR_TO_CTX ||
 		   arg_type == ARG_PTR_TO_CTX_OR_NULL) {
@@ -4084,9 +4091,9 @@ static int check_func_arg(struct bpf_verifier_env *env, u32 arg,
 		return -EFAULT;
 	}
 
-	if (arg_type == ARG_CONST_MAP_PTR) {
-		/* bpf_map_xxx(map_ptr) call: remember that map_ptr */
-		meta->map_ptr = reg->map_ptr;
+	if (arg_type == ARG_CONST_MAP_PTR ||
+	    arg_type == ARG_CONST_MAP_PTR_OR_NULL) {
+		meta->map_ptr = register_is_null(reg) ? NULL : reg->map_ptr;
 	} else if (arg_type == ARG_PTR_TO_MAP_KEY) {
 		/* bpf_map_xxx(..., map_ptr, ..., key) call:
 		 * check that [key, key + map->key_size) are within
@@ -7051,6 +7058,8 @@ static void mark_ptr_or_null_reg(struct bpf_func_state *state,
 			reg->type = PTR_TO_RDONLY_BUF;
 		} else if (reg->type == PTR_TO_RDWR_BUF_OR_NULL) {
 			reg->type = PTR_TO_RDWR_BUF;
+		} else if (reg->type == CONST_PTR_TO_MAP_OR_NULL) {
+			reg->type = CONST_PTR_TO_MAP;
 		}
 		if (is_null) {
 			/* We don't need id and ref_obj_id from this point
