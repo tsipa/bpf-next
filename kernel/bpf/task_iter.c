@@ -329,6 +329,19 @@ static int bpf_iter_attach_task(struct bpf_prog *prog,
 	return 0;
 }
 
+static void bpf_iter_task_show_fdinfo(const struct bpf_iter_aux_info *aux,
+				      struct seq_file *seq)
+{
+	seq_printf(seq, "main_thread_only:\t%u\n", aux->main_thread_only);
+}
+
+static int bpf_iter_task_fill_link_info(const struct bpf_iter_aux_info *aux,
+					struct bpf_link_info *info)
+{
+	info->iter.task.main_thread_only = aux->main_thread_only;
+	return 0;
+}
+
 BTF_ID_LIST(btf_task_file_ids)
 BTF_ID(struct, task_struct)
 BTF_ID(struct, file)
@@ -343,6 +356,8 @@ static const struct bpf_iter_seq_info task_seq_info = {
 static struct bpf_iter_reg task_reg_info = {
 	.target			= "task",
 	.attach_target		= bpf_iter_attach_task,
+	.show_fdinfo		= bpf_iter_task_show_fdinfo,
+	.fill_link_info		= bpf_iter_task_fill_link_info,
 	.ctx_arg_info_size	= 1,
 	.ctx_arg_info		= {
 		{ offsetof(struct bpf_iter__task, task),
@@ -361,6 +376,8 @@ static const struct bpf_iter_seq_info task_file_seq_info = {
 static struct bpf_iter_reg task_file_reg_info = {
 	.target			= "task_file",
 	.attach_target		= bpf_iter_attach_task,
+	.show_fdinfo		= bpf_iter_task_show_fdinfo,
+	.fill_link_info		= bpf_iter_task_fill_link_info,
 	.ctx_arg_info_size	= 2,
 	.ctx_arg_info		= {
 		{ offsetof(struct bpf_iter__task_file, task),

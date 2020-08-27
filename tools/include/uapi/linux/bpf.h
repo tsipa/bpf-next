@@ -4259,6 +4259,11 @@ struct bpf_link_info {
 				struct {
 					__u32 map_id;
 				} map;
+
+				struct {
+					__u32 main_thread_only:1;
+					__u32 :31;
+				} task;
 			};
 		} iter;
 		struct  {
