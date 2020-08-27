@@ -37,13 +37,14 @@ static void test_btf_id_or_null(void)
 	}
 }
 
-static void do_dummy_read(struct bpf_program *prog)
+static void do_dummy_read(struct bpf_program *prog,
+			  struct bpf_iter_attach_opts *opts)
 {
 	struct bpf_link *link;
 	char buf[16] = {};
 	int iter_fd, len;
 
-	link = bpf_program__attach_iter(prog, NULL);
+	link = bpf_program__attach_iter(prog, opts);
 	if (CHECK(IS_ERR(link), "attach_iter", "attach_iter failed\n"))
 		return;
 
@@ -71,7 +72,7 @@ static void test_ipv6_route(void)
 		  "skeleton open_and_load failed\n"))
 		return;
 
-	do_dummy_read(skel->progs.dump_ipv6_route);
+	do_dummy_read(skel->progs.dump_ipv6_route, NULL);
 
 	bpf_iter_ipv6_route__destroy(skel);
 }
@@ -85,7 +86,7 @@ static void test_netlink(void)
 		  "skeleton open_and_load failed\n"))
 		return;
 
-	do_dummy_read(skel->progs.dump_netlink);
+	do_dummy_read(skel->progs.dump_netlink, NULL);
 
 	bpf_iter_netlink__destroy(skel);
 }
@@ -99,7 +100,7 @@ static void test_bpf_map(void)
 		  "skeleton open_and_load failed\n"))
 		return;
 
-	do_dummy_read(skel->progs.dump_bpf_map);
+	do_dummy_read(skel->progs.dump_bpf_map, NULL);
 
 	bpf_iter_bpf_map__destroy(skel);
 }
@@ -113,7 +114,7 @@ static void test_task(void)
 		  "skeleton open_and_load failed\n"))
 		return;
 
-	do_dummy_read(skel->progs.dump_task);
+	do_dummy_read(skel->progs.dump_task, NULL);
 
 	bpf_iter_task__destroy(skel);
 }
@@ -127,22 +128,47 @@ static void test_task_stack(void)
 		  "skeleton open_and_load failed\n"))
 		return;
 
-	do_dummy_read(skel->progs.dump_task_stack);
+	do_dummy_read(skel->progs.dump_task_stack, NULL);
 
 	bpf_iter_task_stack__destroy(skel);
 }
 
+static void *do_nothing(void *arg)
+{
+	pthread_exit(arg);
+}
+
 static void test_task_file(void)
 {
+	DECLARE_LIBBPF_OPTS(bpf_iter_attach_opts, opts);
 	struct bpf_iter_task_file *skel;
+	union bpf_iter_link_info linfo;
+	pthread_t thread_id;
+	void *ret;
 
 	skel = bpf_iter_task_file__open_and_load();
 	if (CHECK(!skel, "bpf_iter_task_file__open_and_load",
 		  "skeleton open_and_load failed\n"))
 		return;
 
-	do_dummy_read(skel->progs.dump_task_file);
+	if (CHECK(pthread_create(&thread_id, NULL, &do_nothing, NULL),
+		  "pthread_create", "pthread_create failed\n"))
+		goto done;
 
+	memset(&linfo, 0, sizeof(linfo));
+	linfo.task.main_thread_only = true;
+	opts.link_info = &linfo;
+	opts.link_info_len = sizeof(linfo);
+	do_dummy_read(skel->progs.dump_task_file, &opts);
+
+	if (CHECK(pthread_join(thread_id, &ret) || ret != NULL,
+		  "pthread_join", "pthread_join failed\n"))
+		goto done;
+
+	CHECK(skel->bss->count != 0, "",
+	      "invalid non main-thread file visit %d\n", skel->bss->count);
+
+done:
 	bpf_iter_task_file__destroy(skel);
 }
 
@@ -155,7 +181,7 @@ static void test_tcp4(void)
 		  "skeleton open_and_load failed\n"))
 		return;
 
-	do_dummy_read(skel->progs.dump_tcp4);
+	do_dummy_read(skel->progs.dump_tcp4, NULL);
 
 	bpf_iter_tcp4__destroy(skel);
 }
@@ -169,7 +195,7 @@ static void test_tcp6(void)
 		  "skeleton open_and_load failed\n"))
 		return;
 
-	do_dummy_read(skel->progs.dump_tcp6);
+	do_dummy_read(skel->progs.dump_tcp6, NULL);
 
 	bpf_iter_tcp6__destroy(skel);
 }
@@ -183,7 +209,7 @@ static void test_udp4(void)
 		  "skeleton open_and_load failed\n"))
 		return;
 
-	do_dummy_read(skel->progs.dump_udp4);
+	do_dummy_read(skel->progs.dump_udp4, NULL);
 
 	bpf_iter_udp4__destroy(skel);
 }
@@ -197,7 +223,7 @@ static void test_udp6(void)
 		  "skeleton open_and_load failed\n"))
 		return;
 
-	do_dummy_read(skel->progs.dump_udp6);
+	do_dummy_read(skel->progs.dump_udp6, NULL);
 
 	bpf_iter_udp6__destroy(skel);
 }
