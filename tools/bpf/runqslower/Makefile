@@ -85,7 +85,8 @@ $(BPFOBJ)-clean: $(BPFOBJ_OUTPUT)
 	$(Q)$(MAKE) -C $(LIBBPF_SRC) OUTPUT=$(BPFOBJ_OUTPUT) clean
 
 $(DEFAULT_BPFTOOL): | $(BPFTOOL_OUTPUT)
-	$(Q)$(MAKE) $(submake_extras) -C ../bpftool OUTPUT=$(BPFTOOL_OUTPUT)
+	$(Q)$(MAKE) $(submake_extras) -C ../bpftool OUTPUT=$(BPFTOOL_OUTPUT)   \
+		    CC=$(HOSTCC) LD=$(HOSTLD)
 
 $(DEFAULT_BPFTOOL)-clean: $(BPFTOOL_OUTPUT)
 ifeq ($(DEFAULT_BPFTOOL),$(BPFTOOL))
