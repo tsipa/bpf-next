@@ -1220,7 +1220,8 @@ int bpf_obj_get_user(const char __user *pathname, int flags);
 	int __init bpf_iter_ ## target(args) { return 0; }
 
 struct bpf_iter_aux_info {
-	struct bpf_map *map;
+	struct bpf_map *map;	/* for iterator traversing map elements */
+	bool main_thread_only;	/* for task/task_file iterator */
 };
 
 typedef int (*bpf_iter_attach_target_t)(struct bpf_prog *prog,

@@ -11,19 +11,22 @@
 
 struct bpf_iter_seq_task_common {
 	struct pid_namespace *ns;
+	bool main_thread_only;
 };
 
 struct bpf_iter_seq_task_info {
 	/* The first field must be struct bpf_iter_seq_task_common.
-	 * this is assumed by {init, fini}_seq_pidns() callback functions.
+	 * this is assumed by {init, fini}_seq_task_common() callback functions.
 	 */
 	struct bpf_iter_seq_task_common common;
 	u32 tid;
 };
 
-static struct task_struct *task_seq_get_next(struct pid_namespace *ns,
-					     u32 *tid)
+static struct task_struct *task_seq_get_next(
+	struct bpf_iter_seq_task_common *task_common, u32 *tid)
 {
+	bool main_thread_only = task_common->main_thread_only;
+	struct pid_namespace *ns = task_common->ns;
 	struct task_struct *task = NULL;
 	struct pid *pid;
 
@@ -31,7 +34,10 @@ static struct task_struct *task_seq_get_next(struct pid_namespace *ns,
 retry:
 	pid = idr_get_next(&ns->idr, tid);
 	if (pid) {
-		task = get_pid_task(pid, PIDTYPE_PID);
+		if (main_thread_only)
+			task = get_pid_task(pid, PIDTYPE_TGID);
+		else
+			task = get_pid_task(pid, PIDTYPE_PID);
 		if (!task) {
 			++*tid;
 			goto retry;
@@ -47,7 +53,7 @@ static void *task_seq_start(struct seq_file *seq, loff_t *pos)
 	struct bpf_iter_seq_task_info *info = seq->private;
 	struct task_struct *task;
 
-	task = task_seq_get_next(info->common.ns, &info->tid);
+	task = task_seq_get_next(&info->common, &info->tid);
 	if (!task)
 		return NULL;
 
@@ -64,7 +70,7 @@ static void *task_seq_next(struct seq_file *seq, void *v, loff_t *pos)
 	++*pos;
 	++info->tid;
 	put_task_struct((struct task_struct *)v);
-	task = task_seq_get_next(info->common.ns, &info->tid);
+	task = task_seq_get_next(&info->common, &info->tid);
 	if (!task)
 		return NULL;
 
@@ -118,7 +124,7 @@ static const struct seq_operations task_seq_ops = {
 
 struct bpf_iter_seq_task_file_info {
 	/* The first field must be struct bpf_iter_seq_task_common.
-	 * this is assumed by {init, fini}_seq_pidns() callback functions.
+	 * this is assumed by {init, fini}_seq_task_common() callback functions.
 	 */
 	struct bpf_iter_seq_task_common common;
 	struct task_struct *task;
@@ -131,7 +137,6 @@ static struct file *
 task_file_seq_get_next(struct bpf_iter_seq_task_file_info *info,
 		       struct task_struct **task, struct files_struct **fstruct)
 {
-	struct pid_namespace *ns = info->common.ns;
 	u32 curr_tid = info->tid, max_fds;
 	struct files_struct *curr_files;
 	struct task_struct *curr_task;
@@ -147,7 +152,7 @@ again:
 		curr_files = *fstruct;
 		curr_fd = info->fd;
 	} else {
-		curr_task = task_seq_get_next(ns, &curr_tid);
+		curr_task = task_seq_get_next(&info->common, &curr_tid);
 		if (!curr_task)
 			return NULL;
 
@@ -293,15 +298,16 @@ static void task_file_seq_stop(struct seq_file *seq, void *v)
 	}
 }
 
-static int init_seq_pidns(void *priv_data, struct bpf_iter_aux_info *aux)
+static int init_seq_task_common(void *priv_data, struct bpf_iter_aux_info *aux)
 {
 	struct bpf_iter_seq_task_common *common = priv_data;
 
 	common->ns = get_pid_ns(task_active_pid_ns(current));
+	common->main_thread_only = aux->main_thread_only;
 	return 0;
 }
 
-static void fini_seq_pidns(void *priv_data)
+static void fini_seq_task_common(void *priv_data)
 {
 	struct bpf_iter_seq_task_common *common = priv_data;
 
@@ -315,19 +321,28 @@ static const struct seq_operations task_file_seq_ops = {
 	.show	= task_file_seq_show,
 };
 
+static int bpf_iter_attach_task(struct bpf_prog *prog,
+				union bpf_iter_link_info *linfo,
+				struct bpf_iter_aux_info *aux)
+{
+	aux->main_thread_only = linfo->task.main_thread_only;
+	return 0;
+}
+
 BTF_ID_LIST(btf_task_file_ids)
 BTF_ID(struct, task_struct)
 BTF_ID(struct, file)
 
 static const struct bpf_iter_seq_info task_seq_info = {
 	.seq_ops		= &task_seq_ops,
-	.init_seq_private	= init_seq_pidns,
-	.fini_seq_private	= fini_seq_pidns,
+	.init_seq_private	= init_seq_task_common,
+	.fini_seq_private	= fini_seq_task_common,
 	.seq_priv_size		= sizeof(struct bpf_iter_seq_task_info),
 };
 
 static struct bpf_iter_reg task_reg_info = {
 	.target			= "task",
+	.attach_target		= bpf_iter_attach_task,
 	.ctx_arg_info_size	= 1,
 	.ctx_arg_info		= {
 		{ offsetof(struct bpf_iter__task, task),
@@ -338,13 +353,14 @@ static struct bpf_iter_reg task_reg_info = {
 
 static const struct bpf_iter_seq_info task_file_seq_info = {
 	.seq_ops		= &task_file_seq_ops,
-	.init_seq_private	= init_seq_pidns,
-	.fini_seq_private	= fini_seq_pidns,
+	.init_seq_private	= init_seq_task_common,
+	.fini_seq_private	= fini_seq_task_common,
 	.seq_priv_size		= sizeof(struct bpf_iter_seq_task_file_info),
 };
 
 static struct bpf_iter_reg task_file_reg_info = {
 	.target			= "task_file",
+	.attach_target		= bpf_iter_attach_task,
 	.ctx_arg_info_size	= 2,
 	.ctx_arg_info		= {
 		{ offsetof(struct bpf_iter__task_file, task),
