@@ -885,3 +885,77 @@ int bpf_prog_bind_map(int prog_fd, int map_fd,
 
 	return sys_bpf(BPF_PROG_BIND_MAP, &attr, sizeof(attr));
 }
+
+int bpf_prog_find_metadata(int prog_fd)
+{
+	struct bpf_prog_info prog_info = {};
+	struct bpf_map_info map_info;
+	__u32 prog_info_len;
+	__u32 map_info_len;
+	int saved_errno;
+	__u32 *map_ids;
+	int nr_maps;
+	int map_fd;
+	int ret;
+	int i;
+
+	prog_info_len = sizeof(prog_info);
+
+	ret = bpf_obj_get_info_by_fd(prog_fd, &prog_info, &prog_info_len);
+	if (ret)
+		return ret;
+
+	if (!prog_info.nr_map_ids)
+		return -1;
+
+	map_ids = calloc(prog_info.nr_map_ids, sizeof(__u32));
+	if (!map_ids)
+		return -1;
+
+	nr_maps = prog_info.nr_map_ids;
+	memset(&prog_info, 0, sizeof(prog_info));
+	prog_info.nr_map_ids = nr_maps;
+	prog_info.map_ids = ptr_to_u64(map_ids);
+	prog_info_len = sizeof(prog_info);
+
+	ret = bpf_obj_get_info_by_fd(prog_fd, &prog_info, &prog_info_len);
+	if (ret)
+		goto free_map_ids;
+
+	ret = -1;
+	for (i = 0; i < prog_info.nr_map_ids; i++) {
+		map_fd = bpf_map_get_fd_by_id(map_ids[i]);
+		if (map_fd < 0) {
+			ret = -1;
+			goto free_map_ids;
+		}
+
+		memset(&map_info, 0, sizeof(map_info));
+		map_info_len = sizeof(map_info);
+		ret = bpf_obj_get_info_by_fd(map_fd, &map_info, &map_info_len);
+		saved_errno = errno;
+		close(map_fd);
+		errno = saved_errno;
+		if (ret)
+			goto free_map_ids;
+
+		if (map_info.type != BPF_MAP_TYPE_ARRAY)
+			continue;
+		if (map_info.key_size != sizeof(int))
+			continue;
+		if (map_info.max_entries != 1)
+			continue;
+		if (!map_info.btf_value_type_id)
+			continue;
+		if (!strstr(map_info.name, ".metadata"))
+			continue;
+
+		ret = map_ids[i];
+		break;
+	}
+
+
+free_map_ids:
+	free(map_ids);
+	return ret;
+}

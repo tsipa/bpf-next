@@ -251,6 +251,7 @@ struct bpf_prog_bind_opts {
 
 LIBBPF_API int bpf_prog_bind_map(int prog_fd, int map_fd,
 				 const struct bpf_prog_bind_opts *opts);
+LIBBPF_API int bpf_prog_find_metadata(int prog_fd);
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
