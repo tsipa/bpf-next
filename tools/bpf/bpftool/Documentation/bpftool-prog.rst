@@ -12,7 +12,7 @@ SYNOPSIS
 
 	**bpftool** [*OPTIONS*] **prog** *COMMAND*
 
-	*OPTIONS* := { { **-j** | **--json** } [{ **-p** | **--pretty** }] | { **-f** | **--bpffs** } }
+	*OPTIONS* := { { **-j** | **--json** } [{ **-p** | **--pretty** }] | { **-f** | **--bpffs** } | {**--metadata**} }
 
 	*COMMANDS* :=
 	{ **show** | **list** | **dump xlated** | **dump jited** | **pin** | **load**
@@ -79,6 +79,9 @@ DESCRIPTION
 		  processes that hold open file descriptors (FDs) against BPF
 		  programs. On such kernels bpftool will automatically emit this
 		  information as well.
+
+		  You can specify **--metadata** option to pretty-print
+		  read-only data from the associated *.metadata* section.
 
 	**bpftool prog dump xlated** *PROG* [{ **file** *FILE* | **opcodes** | **visual** | **linum** }]
 		  Dump eBPF instructions of the programs from the kernel. By

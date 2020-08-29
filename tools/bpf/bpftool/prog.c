@@ -2005,7 +2005,7 @@ static int do_help(int argc, char **argv)
 	}
 
 	fprintf(stderr,
-		"Usage: %1$s %2$s { show | list } [PROG]\n"
+		"Usage: %1$s %2$s { show | list } [PROG] [--metadata]\n"
 		"       %1$s %2$s dump xlated PROG [{ file FILE | opcodes | visual | linum }]\n"
 		"       %1$s %2$s dump jited  PROG [{ file FILE | opcodes | linum }]\n"
 		"       %1$s %2$s pin   PROG FILE\n"
