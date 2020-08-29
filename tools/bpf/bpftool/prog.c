@@ -151,6 +151,130 @@ static void show_prog_maps(int fd, __u32 num_maps)
 	}
 }
 
+static void show_prog_metadata(int fd, __u32 num_maps)
+{
+	const struct btf_type *t_datasec, *t_var;
+	struct bpf_map_info map_info = {};
+	struct btf_var_secinfo *vsi;
+	struct btf *btf = NULL;
+	unsigned int i, vlen;
+	__u32 map_info_len;
+	void *value = NULL;
+	int key = 0;
+	int map_id;
+	int map_fd;
+	int err;
+
+	if (!num_maps)
+		return;
+
+	map_id = bpf_prog_find_metadata(fd);
+	if (map_id < 0)
+		return;
+
+	map_fd = bpf_map_get_fd_by_id(map_id);
+	if (map_fd < 0) {
+		p_err("can't get map by id (%u): %s", map_id, strerror(errno));
+		return;
+	}
+
+	map_info_len = sizeof(map_info);
+	err = bpf_obj_get_info_by_fd(map_fd, &map_info, &map_info_len);
+	if (err) {
+		p_err("can't get map info of id (%u): %s", map_id,
+		      strerror(errno));
+		goto out_close;
+	}
+
+	value = malloc(map_info.value_size);
+	if (!value) {
+		p_err("mem alloc failed");
+		goto out_close;
+	}
+
+	if (bpf_map_lookup_elem(map_fd, &key, value)) {
+		p_err("metadata map lookup failed: %s", strerror(errno));
+		goto out_free;
+	}
+
+	err = btf__get_from_id(map_info.btf_id, &btf);
+	if (err || !btf) {
+		p_err("metadata BTF get failed: %s", strerror(-err));
+		goto out_free;
+	}
+
+	t_datasec = btf__type_by_id(btf, map_info.btf_value_type_id);
+	if (BTF_INFO_KIND(t_datasec->info) != BTF_KIND_DATASEC) {
+		p_err("bad metadata BTF");
+		goto out_free;
+	}
+
+	vlen = BTF_INFO_VLEN(t_datasec->info);
+	vsi = (struct btf_var_secinfo *)(t_datasec + 1);
+
+	/* We don't proceed to check the kinds of the elements of the DATASEC.
+	 * The verifier enforce then to be BTF_KIND_VAR.
+	 */
+
+	if (json_output) {
+		struct btf_dumper d = {
+			.btf = btf,
+			.jw = json_wtr,
+			.is_plain_text = false,
+		};
+
+		jsonw_name(json_wtr, "metadata");
+
+		jsonw_start_object(json_wtr);
+		for (i = 0; i < vlen; i++) {
+			t_var = btf__type_by_id(btf, vsi[i].type);
+
+			jsonw_name(json_wtr, btf__name_by_offset(btf, t_var->name_off));
+			err = btf_dumper_type(&d, t_var->type, value + vsi[i].offset);
+			if (err) {
+				p_err("btf dump failed");
+				break;
+			}
+		}
+		jsonw_end_object(json_wtr);
+	} else {
+		json_writer_t *btf_wtr = jsonw_new(stdout);
+		struct btf_dumper d = {
+			.btf = btf,
+			.jw = btf_wtr,
+			.is_plain_text = true,
+		};
+		if (!btf_wtr) {
+			p_err("jsonw alloc failed");
+			goto out_free;
+		}
+
+		printf("\tmetadata:");
+
+		for (i = 0; i < vlen; i++) {
+			t_var = btf__type_by_id(btf, vsi[i].type);
+
+			printf("\n\t\t%s = ", btf__name_by_offset(btf, t_var->name_off));
+
+			jsonw_reset(btf_wtr);
+			err = btf_dumper_type(&d, t_var->type, value + vsi[i].offset);
+			if (err) {
+				p_err("btf dump failed");
+				break;
+			}
+		}
+
+		jsonw_destroy(&btf_wtr);
+	}
+
+out_free:
+	btf__free(btf);
+	free(value);
+
+out_close:
+	close(map_fd);
+}
+
 static void print_prog_header_json(struct bpf_prog_info *info)
 {
 	jsonw_uint_field(json_wtr, "id", info->id);
@@ -228,6 +352,9 @@ static void print_prog_json(struct bpf_prog_info *info, int fd)
 
 	emit_obj_refs_json(&refs_table, info->id, json_wtr);
 
+	if (dump_metadata)
+		show_prog_metadata(fd, info->nr_map_ids);
+
 	jsonw_end_object(json_wtr);
 }
 
@@ -297,6 +424,9 @@ static void print_prog_plain(struct bpf_prog_info *info, int fd)
 	emit_obj_refs_plain(&refs_table, info->id, "\n\tpids ");
 
 	printf("\n");
+
+	if (dump_metadata)
+		show_prog_metadata(fd, info->nr_map_ids);
 }
 
 static int show_prog(int fd)
