@@ -176,6 +176,8 @@ enum kern_feature_id {
 	FEAT_EXP_ATTACH_TYPE,
 	/* bpf_probe_read_{kernel,user}[_str] helpers */
 	FEAT_PROBE_READ_KERN,
+	/* BPF_PROG_BIND_MAP is supported */
+	FEAT_PROG_BIND_MAP,
 	__FEAT_CNT,
 };
 
@@ -286,6 +288,7 @@ struct bpf_struct_ops {
 #define KCONFIG_SEC ".kconfig"
 #define KSYMS_SEC ".ksyms"
 #define STRUCT_OPS_SEC ".struct_ops"
+#define METADATA_SEC ".metadata"
 
 enum libbpf_map_type {
 	LIBBPF_MAP_UNSPEC,
@@ -293,6 +296,7 @@ enum libbpf_map_type {
 	LIBBPF_MAP_BSS,
 	LIBBPF_MAP_RODATA,
 	LIBBPF_MAP_KCONFIG,
+	LIBBPF_MAP_METADATA,
 };
 
 static const char * const libbpf_type_to_btf_name[] = {
@@ -300,6 +304,7 @@ static const char * const libbpf_type_to_btf_name[] = {
 	[LIBBPF_MAP_BSS]	= BSS_SEC,
 	[LIBBPF_MAP_RODATA]	= RODATA_SEC,
 	[LIBBPF_MAP_KCONFIG]	= KCONFIG_SEC,
+	[LIBBPF_MAP_METADATA]	= METADATA_SEC,
 };
 
 struct bpf_map {
@@ -382,6 +387,7 @@ struct bpf_object {
 	struct extern_desc *externs;
 	int nr_extern;
 	int kconfig_map_idx;
+	int metadata_map_idx;
 
 	bool loaded;
 	bool has_pseudo_calls;
@@ -401,6 +407,7 @@ struct bpf_object {
 		Elf_Data *rodata;
 		Elf_Data *bss;
 		Elf_Data *st_ops_data;
+		Elf_Data *metadata;
 		size_t shstrndx; /* section index for section name strings */
 		size_t strtabidx;
 		struct {
@@ -417,6 +424,7 @@ struct bpf_object {
 		int rodata_shndx;
 		int bss_shndx;
 		int st_ops_shndx;
+		int metadata_shndx;
 	} efile;
 	/*
 	 * All loaded bpf_object is linked in a list, which is
@@ -1028,11 +1036,13 @@ static struct bpf_object *bpf_object__new(const char *path,
 	obj->efile.obj_buf_sz = obj_buf_sz;
 	obj->efile.maps_shndx = -1;
 	obj->efile.btf_maps_shndx = -1;
+	obj->efile.metadata_shndx = -1;
 	obj->efile.data_shndx = -1;
 	obj->efile.rodata_shndx = -1;
 	obj->efile.bss_shndx = -1;
 	obj->efile.st_ops_shndx = -1;
 	obj->kconfig_map_idx = -1;
+	obj->metadata_map_idx = -1;
 
 	obj->kern_version = get_kernel_version();
 	obj->loaded = false;
@@ -1344,7 +1354,8 @@ bpf_object__init_internal_map(struct bpf_object *obj, enum libbpf_map_type type,
 	def->key_size = sizeof(int);
 	def->value_size = data_sz;
 	def->max_entries = 1;
-	def->map_flags = type == LIBBPF_MAP_RODATA || type == LIBBPF_MAP_KCONFIG
+	def->map_flags = type == LIBBPF_MAP_RODATA || type == LIBBPF_MAP_KCONFIG ||
+			 type == LIBBPF_MAP_METADATA
 			 ? BPF_F_RDONLY_PROG : 0;
 	def->map_flags |= BPF_F_MMAPABLE;
 
@@ -1399,6 +1410,16 @@ static int bpf_object__init_global_data_maps(struct bpf_object *obj)
 						    obj->efile.bss->d_size);
 		if (err)
 			return err;
+	}
+	if (obj->efile.metadata_shndx >= 0) {
+		err = bpf_object__init_internal_map(obj, LIBBPF_MAP_METADATA,
+						    obj->efile.metadata_shndx,
+						    obj->efile.metadata->d_buf,
+						    obj->efile.metadata->d_size);
+		if (err)
+			return err;
+
+		obj->metadata_map_idx = obj->nr_maps - 1;
 	}
 	return 0;
 }
@@ -2791,6 +2812,9 @@ static int bpf_object__elf_collect(struct bpf_object *obj)
 			} else if (strcmp(name, STRUCT_OPS_SEC) == 0) {
 				obj->efile.st_ops_data = data;
 				obj->efile.st_ops_shndx = idx;
+			} else if (strcmp(name, METADATA_SEC) == 0) {
+				obj->efile.metadata = data;
+				obj->efile.metadata_shndx = idx;
 			} else {
 				pr_info("elf: skipping unrecognized data section(%d) %s\n",
 					idx, name);
@@ -3202,7 +3226,8 @@ static bool bpf_object__shndx_is_data(const struct bpf_object *obj,
 {
 	return shndx == obj->efile.data_shndx ||
 	       shndx == obj->efile.bss_shndx ||
-	       shndx == obj->efile.rodata_shndx;
+	       shndx == obj->efile.rodata_shndx ||
+	       shndx == obj->efile.metadata_shndx;
 }
 
 static bool bpf_object__shndx_is_maps(const struct bpf_object *obj,
@@ -3223,6 +3248,8 @@ bpf_object__section_to_libbpf_map_type(const struct bpf_object *obj, int shndx)
 		return LIBBPF_MAP_RODATA;
 	else if (shndx == obj->efile.symbols_shndx)
 		return LIBBPF_MAP_KCONFIG;
+	else if (shndx == obj->efile.metadata_shndx)
+		return LIBBPF_MAP_METADATA;
 	else
 		return LIBBPF_MAP_UNSPEC;
 }
@@ -3593,18 +3620,13 @@ static int probe_kern_prog_name(void)
 	return probe_fd(ret);
 }
 
-static int probe_kern_global_data(void)
+static void __probe_create_global_data(int *prog, int *map,
+				       struct bpf_insn *insns, size_t insns_cnt)
 {
 	struct bpf_load_program_attr prg_attr;
 	struct bpf_create_map_attr map_attr;
 	char *cp, errmsg[STRERR_BUFSIZE];
-	struct bpf_insn insns[] = {
-		BPF_LD_MAP_VALUE(BPF_REG_1, 0, 16),
-		BPF_ST_MEM(BPF_DW, BPF_REG_1, 0, 42),
-		BPF_MOV64_IMM(BPF_REG_0, 0),
-		BPF_EXIT_INSN(),
-	};
-	int ret, map;
+	int err;
 
 	memset(&map_attr, 0, sizeof(map_attr));
 	map_attr.map_type = BPF_MAP_TYPE_ARRAY;
@@ -3612,26 +3634,40 @@ static int probe_kern_global_data(void)
 	map_attr.value_size = 32;
 	map_attr.max_entries = 1;
 
-	map = bpf_create_map_xattr(&map_attr);
-	if (map < 0) {
-		ret = -errno;
-		cp = libbpf_strerror_r(ret, errmsg, sizeof(errmsg));
+	*map = bpf_create_map_xattr(&map_attr);
+	if (*map < 0) {
+		err = errno;
+		cp = libbpf_strerror_r(err, errmsg, sizeof(errmsg));
 		pr_warn("Error in %s():%s(%d). Couldn't create simple array map.\n",
-			__func__, cp, -ret);
-		return ret;
+			__func__, cp, -err);
+		return;
 	}
 
-	insns[0].imm = map;
+	insns[0].imm = *map;
 
 	memset(&prg_attr, 0, sizeof(prg_attr));
 	prg_attr.prog_type = BPF_PROG_TYPE_SOCKET_FILTER;
 	prg_attr.insns = insns;
-	prg_attr.insns_cnt = ARRAY_SIZE(insns);
+	prg_attr.insns_cnt = insns_cnt;
 	prg_attr.license = "GPL";
 
-	ret = bpf_load_program_xattr(&prg_attr, NULL, 0);
+	*prog = bpf_load_program_xattr(&prg_attr, NULL, 0);
+}
+
+static int probe_kern_global_data(void)
+{
+	struct bpf_insn insns[] = {
+		BPF_LD_MAP_VALUE(BPF_REG_1, 0, 16),
+		BPF_ST_MEM(BPF_DW, BPF_REG_1, 0, 42),
+		BPF_MOV64_IMM(BPF_REG_0, 0),
+		BPF_EXIT_INSN(),
+	};
+	int prog = -1, map = -1;
+
+	__probe_create_global_data(&prog, &map, insns, ARRAY_SIZE(insns));
+
 	close(map);
-	return probe_fd(ret);
+	return probe_fd(prog);
 }
 
 static int probe_kern_btf(void)
@@ -3758,6 +3794,32 @@ static int probe_kern_probe_read_kernel(void)
 	return probe_fd(bpf_load_program_xattr(&attr, NULL, 0));
 }
 
+static int probe_prog_bind_map(void)
+{
+	struct bpf_insn insns[] = {
+		BPF_MOV64_IMM(BPF_REG_0, 0),
+		BPF_EXIT_INSN(),
+	};
+	int prog = -1, map = -1, ret = 0;
+
+	if (!kernel_supports(FEAT_GLOBAL_DATA))
+		return 0;
+
+	__probe_create_global_data(&prog, &map, insns, ARRAY_SIZE(insns));
+
+	if (map >= 0 && prog < 0) {
+		close(map);
+		return 0;
+	}
+
+	if (!bpf_prog_bind_map(prog, map, NULL))
+		ret = 1;
+
+	close(map);
+	close(prog);
+	return ret;
+}
+
 enum kern_feature_result {
 	FEAT_UNKNOWN = 0,
 	FEAT_SUPPORTED = 1,
@@ -3798,6 +3860,9 @@ static struct kern_feature_desc {
 	},
 	[FEAT_PROBE_READ_KERN] = {
 		"bpf_probe_read_kernel() helper", probe_kern_probe_read_kernel,
+	},
+	[FEAT_PROG_BIND_MAP] = {
+		"BPF_PROG_BIND_MAP support", probe_prog_bind_map,
 	}
 };
 
@@ -3898,7 +3963,8 @@ bpf_object__populate_internal_map(struct bpf_object *obj, struct bpf_map *map)
 	}
 
 	/* Freeze .rodata and .kconfig map as read-only from syscall side. */
-	if (map_type == LIBBPF_MAP_RODATA || map_type == LIBBPF_MAP_KCONFIG) {
+	if (map_type == LIBBPF_MAP_RODATA || map_type == LIBBPF_MAP_KCONFIG ||
+	    map_type == LIBBPF_MAP_METADATA) {
 		err = bpf_map_freeze(map->fd);
 		if (err) {
 			err = -errno;
@@ -6058,6 +6124,28 @@ retry_load:
 	if (ret >= 0) {
 		if (log_buf && load_attr.log_level)
 			pr_debug("verifier log:\n%s", log_buf);
+
+		if (prog->obj->metadata_map_idx >= 0 &&
+		    kernel_supports(FEAT_PROG_BIND_MAP)) {
+			struct bpf_map *metadata_map =
+				&prog->obj->maps[prog->obj->metadata_map_idx];
+
+			/* EEXIST to bpf_prog_bind_map means the map is already
+			 * bound to the program. This can happen if the program
+			 * refers to the map in its code. Since all we are doing
+			 * is to make sure when we iterate the program's maps
+			 * metadata map is always inside, EXIST is okay; we
+			 * ignore this errno
+			 */
+			if (bpf_prog_bind_map(ret, bpf_map__fd(metadata_map), NULL) &&
+			    errno != EEXIST) {
+				cp = libbpf_strerror_r(errno, errmsg, sizeof(errmsg));
+				pr_warn("prog '%s': failed to bind .metadata map: %s\n",
+					prog->name, cp);
+				/* Don't fail hard if can't load metadata. */
+			}
+		}
+
 		*pfd = ret;
 		ret = 0;
 		goto out;
