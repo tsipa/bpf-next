@@ -82,6 +82,8 @@ static const char *get_map_ident(const struct bpf_map *map)
 		return "bss";
 	else if (str_has_suffix(name, ".kconfig"))
 		return "kconfig";
+	else if (str_has_suffix(name, ".metadata"))
+		return "metadata";
 	else
 		return NULL;
 }
@@ -113,6 +115,9 @@ static int codegen_datasec_def(struct bpf_object *obj,
 		strip_mods = true;
 	} else if (strcmp(sec_name, ".kconfig") == 0) {
 		sec_ident = "kconfig";
+	} else if (strcmp(sec_name, ".metadata") == 0) {
+		sec_ident = "metadata";
+		strip_mods = true;
 	} else {
 		return 0;
 	}
