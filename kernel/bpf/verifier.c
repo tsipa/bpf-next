@@ -2629,7 +2629,11 @@ static bool may_access_direct_pkt_data(struct bpf_verifier_env *env,
 				       const struct bpf_call_arg_meta *meta,
 				       enum bpf_access_type t)
 {
-	switch (env->prog->type) {
+	struct bpf_prog *prog = env->prog;
+	enum bpf_prog_type prog_type = prog->aux->linked_prog ?
+	      prog->aux->linked_prog->type : prog->type;
+
+	switch (prog_type) {
 	/* Program types only with direct read access go here! */
 	case BPF_PROG_TYPE_LWT_IN:
 	case BPF_PROG_TYPE_LWT_OUT:
