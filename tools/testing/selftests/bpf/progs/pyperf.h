@@ -67,7 +67,7 @@ typedef struct {
 	void* co_name; // PyCodeObject.co_name
 } FrameData;
 
-static __always_inline void *get_thread_state(void *tls_base, PidData *pidData)
+static __noinline void *get_thread_state(void *tls_base, PidData *pidData)
 {
 	void* thread_state;
 	int key;
@@ -154,12 +154,10 @@ struct {
 	__uint(value_size, sizeof(long long) * 127);
 } stackmap SEC(".maps");
 
-#ifdef GLOBAL_FUNC
-__attribute__((noinline))
-#else
-static __always_inline
+#ifndef GLOBAL_FUNC
+static
 #endif
-int __on_event(struct bpf_raw_tracepoint_args *ctx)
+__noinline int __on_event(struct bpf_raw_tracepoint_args *ctx)
 {
 	uint64_t pid_tgid = bpf_get_current_pid_tgid();
 	pid_t pid = (pid_t)(pid_tgid >> 32);
