@@ -3576,6 +3576,14 @@ union bpf_attr {
  * 		the data in *dst*. This is a wrapper of copy_from_user().
  * 	Return
  * 		0 on success, or a negative error in case of failure.
+ *
+ * u32 bpf_get_xdp_hash(struct xdp_buff *xdp_md)
+ *	Description
+ *		Return the hash for the xdp context passed. This function
+ *		calls skb_flow_dissect in non-skb mode to calculate the
+ *		hash for the packet.
+ *	Return
+ *		The 32-bit hash.
  */
 #define __BPF_FUNC_MAPPER(FN)		\
 	FN(unspec),			\
@@ -3727,6 +3735,7 @@ union bpf_attr {
 	FN(inode_storage_delete),	\
 	FN(d_path),			\
 	FN(copy_from_user),		\
+	FN(get_xdp_hash),		\
 	/* */
 
 /* integer value in 'imm' field of BPF_CALL instruction selects which helper

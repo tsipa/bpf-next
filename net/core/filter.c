@@ -3765,6 +3765,33 @@ static const struct bpf_func_proto bpf_xdp_redirect_map_proto = {
 	.arg3_type      = ARG_ANYTHING,
 };
 
+BPF_CALL_1(bpf_get_xdp_hash, struct xdp_buff *, xdp)
+{
+	void *data_end = xdp->data_end;
+	struct ethhdr *eth = xdp->data;
+	void *data = xdp->data;
+	struct flow_keys keys;
+	u32 ret = 0;
+	int len;
+
+	len = data_end - data;
+	if (len <= 0)
+		return ret;
+	memset(&keys, 0, sizeof(keys));
+	__skb_flow_dissect(dev_net(xdp->rxq->dev), NULL, &flow_keys_dissector,
+			   &keys, data, eth->h_proto, sizeof(*eth), len,
+			   FLOW_DISSECTOR_F_STOP_AT_FLOW_LABEL);
+	ret = flow_hash_from_keys(&keys);
+	return ret;
+}
+
+static const struct bpf_func_proto bpf_get_xdp_hash_proto = {
+	.func		= bpf_get_xdp_hash,
+	.gpl_only	= false,
+	.ret_type	= RET_INTEGER,
+	.arg1_type	= ARG_PTR_TO_CTX,
+};
+
 static unsigned long bpf_skb_copy(void *dst_buff, const void *skb,
 				  unsigned long off, unsigned long len)
 {
@@ -6837,6 +6864,8 @@ xdp_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 		return &bpf_xdp_adjust_tail_proto;
 	case BPF_FUNC_fib_lookup:
 		return &bpf_xdp_fib_lookup_proto;
+	case BPF_FUNC_get_xdp_hash:
+		return &bpf_get_xdp_hash_proto;
 #ifdef CONFIG_INET
 	case BPF_FUNC_sk_lookup_udp:
 		return &bpf_xdp_sk_lookup_udp_proto;
