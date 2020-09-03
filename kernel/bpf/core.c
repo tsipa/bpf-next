@@ -340,7 +340,7 @@ static int bpf_adj_delta_to_imm(struct bpf_insn *insn, u32 pos, s32 end_old,
 	s32 delta = end_new - end_old;
 	s64 imm = insn->imm;
 
-	if (curr < pos && curr + imm + 1 >= end_old)
+	if (curr <= pos && curr + imm + 1 >= end_old)
 		imm += delta;
 	else if (curr >= end_new && curr + imm + 1 < end_new)
 		imm -= delta;
@@ -358,7 +358,7 @@ static int bpf_adj_delta_to_off(struct bpf_insn *insn, u32 pos, s32 end_old,
 	s32 delta = end_new - end_old;
 	s32 off = insn->off;
 
-	if (curr < pos && curr + off + 1 >= end_old)
+	if (curr <= pos && curr + off + 1 >= end_old)
 		off += delta;
 	else if (curr >= end_new && curr + off + 1 < end_new)
 		off -= delta;
