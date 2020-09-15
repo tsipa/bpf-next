@@ -2095,10 +2095,13 @@ static bool is_perfmon_prog_type(enum bpf_prog_type prog_type)
 /* last field in 'union bpf_attr' used by this command */
 #define	BPF_PROG_LOAD_LAST_FIELD attach_prog_fd
 
+static struct bpf_tracing_link *bpf_tracing_link_create(struct bpf_prog *prog,
+							struct bpf_prog *tgt_prog);
+
 static int bpf_prog_load(union bpf_attr *attr, union bpf_attr __user *uattr)
 {
 	enum bpf_prog_type type = attr->prog_type;
-	struct bpf_prog *prog;
+	struct bpf_prog *prog, *tgt_prog = NULL;
 	int err;
 	char license[128];
 	bool is_gpl;
@@ -2154,14 +2157,24 @@ static int bpf_prog_load(union bpf_attr *attr, union bpf_attr __user *uattr)
 	prog->expected_attach_type = attr->expected_attach_type;
 	prog->aux->attach_btf_id = attr->attach_btf_id;
 	if (attr->attach_prog_fd) {
-		struct bpf_prog *tgt_prog;
-
 		tgt_prog = bpf_prog_get(attr->attach_prog_fd);
 		if (IS_ERR(tgt_prog)) {
 			err = PTR_ERR(tgt_prog);
 			goto free_prog_nouncharge;
 		}
-		prog->aux->linked_prog = tgt_prog;
+	}
+
+	if (tgt_prog || prog->aux->attach_btf_id) {
+		struct bpf_tracing_link *link;
+
+		link = bpf_tracing_link_create(prog, tgt_prog);
+		if (IS_ERR(link)) {
+			err = PTR_ERR(link);
+			if (tgt_prog)
+				bpf_prog_put(tgt_prog);
+			goto free_prog_nouncharge;
+		}
+		prog->aux->tgt_link = link;
 	}
 
 	prog->aux->offload_requested = !!attr->prog_ifindex;
@@ -2495,14 +2508,20 @@ struct bpf_link *bpf_link_get_from_fd(u32 ufd)
 	return link;
 }
 
-struct bpf_tracing_link {
-	struct bpf_link link;
-	enum bpf_attach_type attach_type;
-};
-
 static void bpf_tracing_link_release(struct bpf_link *link)
 {
-	WARN_ON_ONCE(bpf_trampoline_unlink_prog(link->prog));
+	struct bpf_tracing_link *tr_link =
+		container_of(link, struct bpf_tracing_link, link);
+
+	if (tr_link->trampoline) {
+		WARN_ON_ONCE(bpf_trampoline_unlink_prog(link->prog,
+							tr_link->trampoline));
+
+		bpf_trampoline_put(tr_link->trampoline);
+	}
+
+	if (tr_link->tgt_prog)
+		bpf_prog_put(tr_link->tgt_prog);
 }
 
 static void bpf_tracing_link_dealloc(struct bpf_link *link)
@@ -2542,6 +2561,34 @@ static const struct bpf_link_ops bpf_tracing_link_lops = {
 	.fill_link_info = bpf_tracing_link_fill_link_info,
 };
 
+static struct bpf_tracing_link *bpf_tracing_link_create(struct bpf_prog *prog,
+							struct bpf_prog *tgt_prog)
+{
+	struct bpf_tracing_link *link;
+
+	link = kzalloc(sizeof(*link), GFP_USER);
+	if (!link)
+		return ERR_PTR(-ENOMEM);
+
+	bpf_link_init(&link->link, BPF_LINK_TYPE_TRACING,
+		      &bpf_tracing_link_lops, prog);
+	link->attach_type = prog->expected_attach_type;
+	link->tgt_prog = tgt_prog;
+
+	return link;
+}
+
+void bpf_tracing_link_free(struct bpf_tracing_link *link)
+{
+	if (!link)
+		return;
+	if (link->trampoline)
+		bpf_trampoline_put(link->trampoline);
+	if (link->tgt_prog)
+		bpf_prog_put(link->tgt_prog);
+	kfree(link);
+}
+
 static int bpf_tracing_prog_attach(struct bpf_prog *prog)
 {
 	struct bpf_link_primer link_primer;
@@ -2574,28 +2621,27 @@ static int bpf_tracing_prog_attach(struct bpf_prog *prog)
 		goto out_put_prog;
 	}
 
-	link = kzalloc(sizeof(*link), GFP_USER);
+	link = xchg(&prog->aux->tgt_link, NULL);
 	if (!link) {
-		err = -ENOMEM;
+		err = -ENOENT;
 		goto out_put_prog;
 	}
-	bpf_link_init(&link->link, BPF_LINK_TYPE_TRACING,
-		      &bpf_tracing_link_lops, prog);
-	link->attach_type = prog->expected_attach_type;
 
 	err = bpf_link_prime(&link->link, &link_primer);
-	if (err) {
-		kfree(link);
-		goto out_put_prog;
-	}
+	if (err)
+		goto out_restore_link;
 
-	err = bpf_trampoline_link_prog(prog);
+	err = bpf_trampoline_link_prog(prog, link->trampoline);
 	if (err) {
+		bpf_trampoline_put(link->trampoline);
+		link->trampoline = NULL;
 		bpf_link_cleanup(&link_primer);
 		goto out_put_prog;
 	}
 
 	return bpf_link_settle(&link_primer);
+out_restore_link:
+	WARN_ON_ONCE(cmpxchg(&prog->aux->tgt_link, NULL, link) != NULL);
 out_put_prog:
 	bpf_prog_put(prog);
 	return err;
