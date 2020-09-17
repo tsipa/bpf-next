@@ -1,0 +1,33 @@
+sudo: required
+language: bash
+dist: bionic
+services:
+- docker
+env:
+  global:
+  - PROJECT_NAME='libbpf'
+  - AUTHOR_EMAIL="$(git log -1 --pretty=\"%aE\")"
+  - REPO_ROOT="$TRAVIS_BUILD_DIR"
+  - CI_ROOT="$REPO_ROOT/travis-ci"
+  - VMTEST_ROOT="$CI_ROOT/vmtest"
+  - secure: BWtHRVLtBB6VPU9wq3cEwYmzu5mMkF2mAPpyCPclHCksdZsDb9xf7zmSt5YoQuefCOEmbRlBfxya5vDKJwNNuNXJGxTU186h20Zve80zZtUvSV1e4c8AtHiZRswkoyENU4M7S4Ei/t5BV8mdvh4vnFy95R2kxsfThAIME3M/rstSXFd1EmpZ7vv2SZc2BUET3vVVwcM9xcupQqiX02UFozAzUMecIRYQscA9hWfg2z8DTzwtZkVZ/hchRT7bu6tvLxR0HBCguIGu4GQZtqrFVU/i3v8hOgK9MwFy+NVsOOwFtFhdMUzgwtN0owB2lZSLGpWh6AVHLNuwkOtm2MyrhfeW908/S1LFCmhvMw65CTrKVTxx9+Vb+DiRYrb2I7Y+30fxIe5s+kA8Kyn7fbwkKBPzE1nqBNwI1y00EFiSZaSkl/twpp2jRCONg2i1YiHSLDmwzVWiLIFtbXBRm2p8bPnMFuphRoAfSCXHhiGQxz7UhBZMX4Tm9ZcQACff3HpRVHBuQazzMIO51jRdJguwXg9CJ9QBN7aMqUBBv1L8hzk2NQguQHGKGkgfXshHer0a073aiLItSotWoNIILVKSyawjNkMLey/ExN/ouTTwtctOkiAAU5TMcoWD3fHjEp4B8+/3Mj2hdAU2Uc8SNMIg7G1j++XdIRRG3bJoj3CkMHM=
+addons:
+  apt:
+    packages:
+    - qemu-kvm
+    - zstd
+    - binutils-dev
+    - elfutils
+    - libcap-dev
+    - libelf-dev
+    - libdw-dev
+    - python3-docutils
+    - python3-pip
+jobs:
+  include:
+  - stage: Builds & Tests
+    name: Kernel LATEST + selftests
+    language: bash
+    env: KERNEL=LATEST
+    script: "echo TEST > $CI_ROOT/vmtest/report && false"
+    after_failure: "pip3 install -r $CI_ROOT/github/requirements.txt && cat $CI_ROOT/vmtest/report | $CI_ROOT/github/gh.py comment"
