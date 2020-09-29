@@ -4033,8 +4033,7 @@ static bool map_is_reuse_compat(const struct bpf_map *map, int map_fd)
 		map_info.map_flags == map->def.map_flags);
 }
 
-static int
-bpf_object__reuse_map(struct bpf_map *map)
+int bpf_object__reuse_map(struct bpf_map *map)
 {
 	char *cp, errmsg[STRERR_BUFSIZE];
 	int err, pin_fd;

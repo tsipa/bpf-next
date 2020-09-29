@@ -431,6 +431,7 @@ bpf_map__prev(const struct bpf_map *map, const struct bpf_object *obj);
 /* get/set map FD */
 LIBBPF_API int bpf_map__fd(const struct bpf_map *map);
 LIBBPF_API int bpf_map__reuse_fd(struct bpf_map *map, int fd);
+LIBBPF_API int bpf_object__reuse_map(struct bpf_map *map);
 /* get map definition */
 LIBBPF_API const struct bpf_map_def *bpf_map__def(const struct bpf_map *map);
 /* get map name */
