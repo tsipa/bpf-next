@@ -145,7 +145,9 @@ static bool is_ineligible(const struct sk_buff *skb)
 	int ptr = (u8 *)(ipv6_hdr(skb) + 1) - skb->data;
 	int len = skb->len - ptr;
 	__u8 nexthdr = ipv6_hdr(skb)->nexthdr;
+	unsigned int offs = 0;
 	__be16 frag_off;
+	bool is_frag;
 
 	if (len < 0)
 		return true;
@@ -153,12 +155,21 @@ static bool is_ineligible(const struct sk_buff *skb)
 	ptr = ipv6_skip_exthdr(skb, ptr, &nexthdr, &frag_off);
 	if (ptr < 0)
 		return false;
+
+	is_frag = (ipv6_find_hdr(skb, &offs, NEXTHDR_FRAGMENT, &frag_off, NULL) == NEXTHDR_FRAGMENT);
+
 	if (nexthdr == IPPROTO_ICMPV6) {
 		u8 _type, *tp;
 		tp = skb_header_pointer(skb,
 			ptr+offsetof(struct icmp6hdr, icmp6_type),
 			sizeof(_type), &_type);
-		if (!tp || !(*tp & ICMPV6_INFOMSG_MASK))
+
+		/* Based on RFC 8200, Section 4.5 Fragment Header, return
+		 * false if this is a fragment packet with no icmp header info.
+		 */
+		if (!tp && is_frag)
+			return false;
+		else if (!tp || !(*tp & ICMPV6_INFOMSG_MASK))
 			return true;
 	}
 	return false;

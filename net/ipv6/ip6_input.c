@@ -146,8 +146,11 @@ static struct sk_buff *ip6_rcv_core(struct sk_buff *skb, struct net_device *dev,
 				    struct net *net)
 {
 	const struct ipv6hdr *hdr;
-	u32 pkt_len;
 	struct inet6_dev *idev;
+	__be16 frag_off;
+	u32 pkt_len;
+	int offset;
+	u8 nexthdr;
 
 	if (skb->pkt_type == PACKET_OTHERHOST) {
 		kfree_skb(skb);
@@ -280,6 +283,21 @@ static struct sk_buff *ip6_rcv_core(struct sk_buff *skb, struct net_device *dev,
 			rcu_read_unlock();
 			return NULL;
 		}
+	}
+
+	/* RFC 8200, Section 4.5 Fragment Header:
+	 * If the first fragment does not include all headers through an
+	 * Upper-Layer header, then that fragment should be discarded and
+	 * an ICMP Parameter Problem, Code 3, message should be sent to
+	 * the source of the fragment, with the Pointer field set to zero.
+	 */
+	nexthdr = hdr->nexthdr;
+	offset = ipv6_skip_exthdr(skb, skb_transport_offset(skb), &nexthdr, &frag_off);
+	if (frag_off == htons(IP6_MF) && !pskb_may_pull(skb, offset + 1)) {
+		__IP6_INC_STATS(net, idev, IPSTATS_MIB_INHDRERRORS);
+		icmpv6_param_prob(skb, ICMPV6_HDR_INCOMP, 0);
+		rcu_read_unlock();
+		return NULL;
 	}
 
 	rcu_read_unlock();
