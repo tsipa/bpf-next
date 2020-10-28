@@ -841,6 +841,7 @@ static inline int sk_filter(struct sock *sk, struct sk_buff *skb)
 }
 
 struct bpf_prog *bpf_prog_select_runtime(struct bpf_prog *fp, int *err);
+void bpf_prog_select_func(struct bpf_prog *fp);
 void bpf_prog_free(struct bpf_prog *fp);
 
 bool bpf_opcode_in_insntable(u8 code);
