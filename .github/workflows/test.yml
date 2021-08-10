@@ -1,0 +1,28 @@
+name: bpf-ci
+
+on:
+  pull_request:
+  push:
+
+concurrency: 
+  group: ci-test-${{ github.head_ref }}
+  cancel-in-progress: true
+
+jobs:
+  vmtest:
+    runs-on: ubuntu-latest
+    name: Kernel ${{ matrix.kernel }} + selftests
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - kernel: 'LATEST'
+    steps:
+      - uses: actions/checkout@v2
+        name: Checkout
+      - uses: libbpf/libbpf/setup
+        name: Setup
+      - uses: libbpf/libbpf/vmtest
+        name: vmtest
+        with:
+          kernel: ${{ matrix.kernel }}
