@@ -1582,6 +1582,20 @@ unsigned long ftrace_location(unsigned long ip)
 }
 
 /**
+ * ftrace_location_lookup - return exact address of traced location
+ * @ip: the instruction pointer to check
+ *
+ * Used to lookup traced location around function entry. This is
+ * especially useful on architectures where the traced location is
+ * not the very first instruction in a function. Such architectures
+ * should provide an implementation of this function.
+ */
+unsigned long __weak ftrace_location_lookup(unsigned long ip)
+{
+	return ftrace_location_range(ip, ip);
+}
+
+/**
  * ftrace_text_reserved - return true if range contains an ftrace location
  * @start: start of range to search
  * @end: end of range to search (inclusive). @end points to the last byte to check.

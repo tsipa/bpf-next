@@ -580,6 +580,7 @@ int ftrace_test_record(struct dyn_ftrace *rec, bool enable);
 void ftrace_run_stop_machine(int command);
 unsigned long ftrace_location(unsigned long ip);
 unsigned long ftrace_location_range(unsigned long start, unsigned long end);
+unsigned long ftrace_location_lookup(unsigned long ip);
 unsigned long ftrace_get_addr_new(struct dyn_ftrace *rec);
 unsigned long ftrace_get_addr_curr(struct dyn_ftrace *rec);
 
@@ -790,6 +791,10 @@ static inline int ftrace_text_reserved(const void *start, const void *end)
 	return 0;
 }
 static inline unsigned long ftrace_location(unsigned long ip)
+{
+	return 0;
+}
+static inline unsigned long ftrace_location_lookup(unsigned long ip)
 {
 	return 0;
 }
