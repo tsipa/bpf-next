@@ -153,9 +153,14 @@ static inline int bpf2a64_offset(int bpf_insn, int off,
 	/*
 	 * Whereas arm64 branch instructions encode the offset
 	 * from the branch itself, so we must subtract 1 from the
-	 * instruction offset.
+	 * instruction offset. The unit of ctx->offset is byte, so
+	 * subtract AARCH64_INSN_SIZE from it. bpf2a64_offset()
+	 * returns instruction offset, so divide by AARCH64_INSN_SIZE
+	 * at the end.
 	 */
-	return ctx->offset[bpf_insn + off] - (ctx->offset[bpf_insn] - 1);
+	return (ctx->offset[bpf_insn + off] -
+		(ctx->offset[bpf_insn] - AARCH64_INSN_SIZE)) /
+		AARCH64_INSN_SIZE;
 }
 
 static void jit_fill_hole(void *area, unsigned int size)
@@ -946,13 +951,14 @@ static int build_body(struct jit_ctx *ctx, bool extra_pass)
 		const struct bpf_insn *insn = &prog->insnsi[i];
 		int ret;
 
+		/* BPF line info needs byte-offset instead of insn-offset */
 		if (ctx->image == NULL)
-			ctx->offset[i] = ctx->idx;
+			ctx->offset[i] = ctx->idx * AARCH64_INSN_SIZE;
 		ret = build_insn(insn, ctx, extra_pass);
 		if (ret > 0) {
 			i++;
 			if (ctx->image == NULL)
-				ctx->offset[i] = ctx->idx;
+				ctx->offset[i] = ctx->idx * AARCH64_INSN_SIZE;
 			continue;
 		}
 		if (ret)
@@ -964,7 +970,7 @@ static int build_body(struct jit_ctx *ctx, bool extra_pass)
 	 * instruction (end of program)
 	 */
 	if (ctx->image == NULL)
-		ctx->offset[i] = ctx->idx;
+		ctx->offset[i] = ctx->idx * AARCH64_INSN_SIZE;
 
 	return 0;
 }
@@ -1049,15 +1055,18 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 		goto out_off;
 	}
 
-	/* 1. Initial fake pass to compute ctx->idx. */
-
-	/* Fake pass to fill in ctx->offset. */
-	if (build_body(&ctx, extra_pass)) {
+	/*
+	 * 1. Initial fake pass to compute ctx->idx and ctx->offset.
+	 *
+	 * BPF line info needs ctx->offset[i] to be the offset of
+	 * instruction[i] in jited image, so build prologue first.
+	 */
+	if (build_prologue(&ctx, was_classic)) {
 		prog = orig_prog;
 		goto out_off;
 	}
 
-	if (build_prologue(&ctx, was_classic)) {
+	if (build_body(&ctx, extra_pass)) {
 		prog = orig_prog;
 		goto out_off;
 	}
